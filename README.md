@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 📊 forecastly
 
 **forecastly** — это дипломный проект на Python, направленный на **анализ и прогнозирование продаж компании** с использованием методов машинного обучения и интерактивной визуализации данных.
@@ -85,3 +86,26 @@ python -m streamlit run src/ui/dashboard.py
 E-mail: nikitavulfert@example.com
 
 Telegram: @bruhnikita
+=======
+# Sales Forecasting (Python)
+
+## Быстрый старт
+```bash
+python -m venv venv
+venv\Scripts\activate  # Windows (или source venv/bin/activate на Mac/Linux)
+pip install -r requirements.txt
+```
+
+### Демо-данные
+`data/raw/sales.csv` уже есть.
+
+### Streamlit UI
+```bash
+streamlit run src/ui/dashboard.py
+```
+
+### API (FastAPI)
+```bash
+uvicorn src.api.app:app --reload
+```
+>>>>>>> c49b30f (Первая версия. Запускается дашборд, генерятся синтетические данные, отображаются таблицы.)

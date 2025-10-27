@@ -1,0 +1,86 @@
+# === Python / general ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.so
+*.dll
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Logs
+logs/
+*.log
+
+# Temporary / cache
+*.tmp
+*.temp
+*.bak
+*.swp
+*.DS_Store
+Thumbs.db
+.cache/
+.ipynb_checkpoints/
+*.sqlite3
+
+# === Data files ===
+data/raw/
+data/processed/
+data/models/
+data/temp/
+!data/README.md   # оставим инструкцию, если нужно
+
+# === Configuration ===
+*.env
+.env.*
+.envrc
+
+# === IDE and OS ===
+.vscode/
+.idea/
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
+__MACOSX/
+
+# === Streamlit cache ===
+.streamlit/
+.stlite/
+*.stlite
+
+# === Jupyter / notebooks ===
+*.ipynb
+.ipynb_checkpoints/
+
+# === Model artifacts / results ===
+*.pkl
+*.joblib
+*.h5
+*.onnx
+*.pt
+*.model
+*.sav
+*.json
+
+# === Reports and exports ===
+exports/
+reports/
+*.csv
+*.xlsx
+*.pdf
+*.png
+*.jpg
+*.jpeg
+
+# === Build / dist ===
+build/
+dist/
+*.egg-info/
+MANIFEST
+
+# === System backup ===
+~$*

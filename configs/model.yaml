@@ -1,0 +1,10 @@
+model:
+  horizon_weeks: 8
+  lgbm:
+    n_estimators: 500
+    learning_rate: 0.05
+    num_leaves: 31
+  prophet:
+    seasonality_mode: additive
+    weekly_seasonality: true
+    yearly_seasonality: true
