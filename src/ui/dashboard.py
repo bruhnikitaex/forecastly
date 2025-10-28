@@ -89,24 +89,40 @@ with tabs[1]:
             # === График (с корректным отображением моделей) ===
             MODEL_COL = {"Prophet": "prophet", "LightGBM": "lgbm", "Ensemble": "ensemble"}
 
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.plot(df_true_tail['date'], df_true_tail['units'], label='Факт', color='black')
+            fig, ax = plt.subplots(figsize=(11, 4.2))
+            ax.grid(True, alpha=0.25)
+            ax.plot(df_true_tail['date'], df_true_tail['units'], label='Факт', color='black', linewidth=1.6)
+
+            plotted_any = False
+            # Интервалы Prophet (если выбрана модель и есть столбцы)
+            if "Prophet" in model_choice and {'p_low','p_high'}.issubset(df_p.columns):
+                band = df_p[['date','p_low','p_high']].dropna()
+                if not band.empty:
+                    ax.fill_between(band['date'], band['p_low'], band['p_high'], alpha=0.15, label='Prophet CI')
 
             for model in model_choice:
                 col = MODEL_COL.get(model)
-                if col and col in df_p.columns:
-                    ax.plot(df_p['date'], df_p[col], label=model)
+                if not col or col not in df_p.columns:
+                    continue
+                s = pd.to_numeric(df_p[col], errors='coerce')
+                m = s.notna()
+                if m.any():
+                    ax.plot(df_p.loc[m,'date'], s[m], label=model, linewidth=2)
+                    plotted_any = True
+
+            if not plotted_any:
+                st.warning("Для выбранного SKU нет числовых прогнозов (все значения NaN). Переобучи модели или выбери другой SKU.")
 
             ax.legend()
             ax.set_title(f"Прогноз продаж ({selected_sku})")
             ax.set_xlabel("Дата")
             ax.set_ylabel("Продажи, шт.")
+            fig.tight_layout()
             st.pyplot(fig)
 
             st.dataframe(df_p.tail(20), width='stretch')
         else:
             st.info("Сначала сделай прогноз (кнопкой выше).")
-
 
 # =====================================================================
 # ⚙️ Вкладка 3. МОДЕЛИ
@@ -135,7 +151,7 @@ with tabs[3]:
     metrics_path = data_proc / 'metrics.csv'
     raw_path = data_raw / 'sales_synth.csv'
 
-    c1, c2, c3 = st.columns([1, 1, 2])
+    c1, c2, _ = st.columns([1, 1, 2])
     with c1:
         horizon_eval = st.slider("Горизонт (дней)", 7, 60, 14, key="eval_hor")
     with c2:
