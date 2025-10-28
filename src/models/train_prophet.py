@@ -1,35 +1,34 @@
-import pandas as pd
-import joblib
-from prophet import Prophet
+# src/models/train_prophet.py
 from pathlib import Path
-from src.utils.config import PATHS, MODEL_CFG
+import pandas as pd
+from prophet import Prophet
+from joblib import dump
+from src.utils.config import PATHS
 from src.utils.logger import logger
-from src.etl.load_data import load_sales
-from src.etl.clean_data import clean_sales
-from src.etl.feature_builder import build_features
-
-OUT = Path(PATHS['data']['models_dir']) / 'prophet_model.pkl'
-
-def prepare(df: pd.DataFrame) -> pd.DataFrame:
-    agg = df.groupby('date', as_index=False)['units'].sum()
-    agg = agg.rename(columns={'date':'ds','units':'y'})
-    return agg
 
 def train():
-    df = load_sales()
-    df = clean_sales(df)
-    df = build_features(df)
-    train_df = prepare(df)
-    logger.info('Training Prophet...')
-    m = Prophet(
-        weekly_seasonality=MODEL_CFG['model']['prophet']['weekly_seasonality'],
-        yearly_seasonality=MODEL_CFG['model']['prophet']['yearly_seasonality'],
-        seasonality_mode=MODEL_CFG['model']['prophet']['seasonality_mode'],
-    )
-    m.fit(train_df)
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(m, OUT)
-    logger.info(f'Model saved to {OUT}')
+    processed_file = Path(PATHS['data']['processed'])      # .../processed.parquet (файл)
+    models_dir     = Path(PATHS['data']['models_dir'])
+    models_dir.mkdir(parents=True, exist_ok=True)
 
-if __name__ == '__main__':
+    df = pd.read_parquet(processed_file)
+    df = df[['date', 'sku_id', 'units']].copy()
+    df['date'] = pd.to_datetime(df['date'])
+    df.rename(columns={'date':'ds', 'units':'y'}, inplace=True)
+
+    models = {}
+    for sku in df['sku_id'].unique():
+        df_sku = df[df['sku_id'] == sku][['ds','y']].sort_values('ds')
+        if len(df_sku) < 30 or df_sku['y'].sum() == 0:
+            logger.warning(f"Skip {sku}: not enough data")
+            continue
+        m = Prophet(daily_seasonality=True, weekly_seasonality=True, yearly_seasonality=True)
+        m.fit(df_sku)
+        models[sku] = m
+        logger.info(f"Prophet model trained for {sku} ({len(df_sku)} rows)")
+
+    dump(models, models_dir / 'prophet_model.pkl')
+    print(f"✅ Обучено моделей Prophet: {len(models)} → {models_dir / 'prophet_model.pkl'}")
+
+if __name__ == "__main__":
     train()

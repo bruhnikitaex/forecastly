@@ -56,8 +56,8 @@
 ## 🚀 Как запустить проект
 ```bash
 # Клонировать репозиторий
-git clone https://github.com/<твой_ник>/sales-forecasting-system.git
-cd sales-forecasting-system
+git clone https://github.com/<твой_ник>/forecastly.git
+cd forecastly
 
 # Создать и активировать виртуальное окружение
 python -m venv venv
@@ -82,7 +82,7 @@ python -m streamlit run src/ui/dashboard.py
 
 Если проект показался интересным — можно связаться:
 
-E-mail: nikitavulfert@example.com
+E-mail: niksmailgood@mail.ru
 
 Telegram: @bruhnikita
 =======
