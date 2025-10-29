@@ -1,39 +1,43 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import os
 from pathlib import Path
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title='Sales Analytics & Forecast', layout='wide')
-st.title('Система анализа и прогнозирования продаж')
-st.caption('ETL → Аналитика → Прогнозирование')
+st.set_page_config(page_title='Forecastly', layout='wide')
 
-# --- Пути к данным ---
+# === Пути к данным ===
 data_raw = Path('data/raw')
 data_proc = Path('data/processed')
 data_models = Path('data/models')
-data_raw.mkdir(parents=True, exist_ok=True)
-data_proc.mkdir(parents=True, exist_ok=True)
-data_models.mkdir(parents=True, exist_ok=True)
+for p in [data_raw, data_proc, data_models]:
+    p.mkdir(parents=True, exist_ok=True)
 
-# --- Навигация ---
-tabs = st.tabs(["📊 Данные", "📈 Прогноз", "⚙️ Модели", "📐 Метрики"])
+st.sidebar.title("Forecastly")
+st.sidebar.caption("Система анализа и прогнозирования продаж")
+st.sidebar.markdown("**Автор:** Вульферт Никита Евгеньевич  \n**Группа:** 122 ИСП")
+st.sidebar.divider()
+
+st.title('Система анализа и прогнозирования продаж')
+st.caption('ETL → Аналитика → Прогнозирование')
+
+tabs = st.tabs(["📊 Данные", "📈 Прогноз", "📐 Аналитика", "⚙️ Модели", "🧮 Метрики"])
 
 # =====================================================================
-# 📊 Вкладка 1. ДАННЫЕ
+# 📊 ДАННЫЕ
 # =====================================================================
 with tabs[0]:
     st.subheader("Работа с данными")
-
     c1, c2 = st.columns(2)
     with c1:
         if st.button('Сгенерировать синтетические данные'):
             os.system('python -m src.etl.create_synthetic')
-            st.success('Синтетические данные созданы: data/raw/sales_synth.csv')
+            st.success('✅ Синтетические данные созданы: data/raw/sales_synth.csv')
     with c2:
         if st.button('Запустить ETL (очистка + фичи)'):
             os.system('python -c "from src.etl.prepare_dataset import main; main(\'data/raw/sales_synth.csv\')"')
-            st.success('ETL завершён: data/processed/*')
+            st.success('✅ ETL завершён: data/processed/*')
 
     raw_path = data_raw / 'sales_synth.csv'
     if raw_path.exists():
@@ -44,80 +48,59 @@ with tabs[0]:
         st.info('Нажми «Сгенерировать синтетические данные», чтобы получить датасет.')
 
 # =====================================================================
-# 📈 Вкладка 2. ПРОГНОЗ
+# 📈 ПРОГНОЗ
 # =====================================================================
 with tabs[1]:
     st.subheader("Прогнозирование продаж")
 
-    pred_path = data_proc / 'predictions.csv'
-
-    # загрузка исходных данных
-    df_raw = None
-    if (data_raw / 'sales_synth.csv').exists():
-        df_raw = pd.read_csv(data_raw / 'sales_synth.csv', parse_dates=['date'])
+    pred_path = data_proc / 'processed.parquet' / 'predictions.csv'
+    df_raw = pd.read_csv(data_raw / 'sales_synth.csv', parse_dates=['date']) if (data_raw / 'sales_synth.csv').exists() else None
 
     if df_raw is None:
         st.info("Сначала сгенерируй данные во вкладке «Данные».")
     else:
         sku_list = df_raw['sku_id'].unique().tolist()
-        selected_sku = st.selectbox("Выберите товар (SKU)", sku_list)
-        horizon = st.slider("Горизонт прогноза (дней)", 7, 60, 14)
-        model_choice = st.multiselect(
-            "Выберите модель",
-            ["Prophet", "LightGBM", "Ensemble"],
-            default=["Ensemble", "Prophet", "LightGBM"]
-        )
+        c0, c1, c2 = st.columns([2,1,1])
+        with c0:
+            selected_sku = st.selectbox("Выберите товар (SKU)", sku_list)
+        with c1:
+            horizon = st.slider("Горизонт (дней)", 7, 60, 14)
+        with c2:
+            models_selected = st.multiselect("Модели", ["Ensemble", "Prophet", "LightGBM"],
+                                             default=["Ensemble", "Prophet", "LightGBM"])
 
         if st.button("Сделать прогноз"):
             os.system(f"python -m src.models.predict --horizon {horizon}")
-            st.success(f'Прогноз на {horizon} дней выполнен!')
+            st.success(f'✅ Прогноз на {horizon} дней выполнен!')
 
         if pred_path.exists():
             df_pred = pd.read_csv(pred_path, parse_dates=['date'])
 
-            # фактические значения (последние 120 дней)
             df_true = df_raw[df_raw['sku_id'] == selected_sku].copy()
             df_true_tail = df_true.sort_values('date').tail(120)
 
-            # безопасная фильтрация прогнозов по SKU
             if 'sku_id' in df_pred.columns:
                 df_p = df_pred[df_pred['sku_id'] == selected_sku].copy()
             else:
                 df_p = df_pred.copy()
                 df_p['sku_id'] = selected_sku
 
-            # === График (с корректным отображением моделей) ===
             MODEL_COL = {"Prophet": "prophet", "LightGBM": "lgbm", "Ensemble": "ensemble"}
+            color_map = {"prophet": "#00AEEF", "lgbm": "#F45B69", "ensemble": "#7AC74F"}
 
-            fig, ax = plt.subplots(figsize=(11, 4.2))
+            fig, ax = plt.subplots(figsize=(11, 4))
             ax.grid(True, alpha=0.25)
             ax.plot(df_true_tail['date'], df_true_tail['units'], label='Факт', color='black', linewidth=1.6)
 
-            plotted_any = False
-            # Интервалы Prophet (если выбрана модель и есть столбцы)
-            if "Prophet" in model_choice and {'p_low','p_high'}.issubset(df_p.columns):
-                band = df_p[['date','p_low','p_high']].dropna()
-                if not band.empty:
-                    ax.fill_between(band['date'], band['p_low'], band['p_high'], alpha=0.15, label='Prophet CI')
-
-            for model in model_choice:
-                col = MODEL_COL.get(model)
-                if not col or col not in df_p.columns:
-                    continue
-                s = pd.to_numeric(df_p[col], errors='coerce')
-                m = s.notna()
-                if m.any():
-                    ax.plot(df_p.loc[m,'date'], s[m], label=model, linewidth=2)
-                    plotted_any = True
-
-            if not plotted_any:
-                st.warning("Для выбранного SKU нет числовых прогнозов (все значения NaN). Переобучи модели или выбери другой SKU.")
+            for name in models_selected:
+                col = MODEL_COL.get(name)
+                if col and col in df_p.columns:
+                    ax.plot(df_p['date'], df_p[col], label=name, linewidth=2, color=color_map.get(col, None))
 
             ax.legend()
             ax.set_title(f"Прогноз продаж ({selected_sku})")
             ax.set_xlabel("Дата")
             ax.set_ylabel("Продажи, шт.")
-            fig.tight_layout()
             st.pyplot(fig)
 
             st.dataframe(df_p.tail(20), width='stretch')
@@ -125,91 +108,62 @@ with tabs[1]:
             st.info("Сначала сделай прогноз (кнопкой выше).")
 
 # =====================================================================
-# ⚙️ Вкладка 3. МОДЕЛИ
+# 📐 АНАЛИТИКА
 # =====================================================================
 with tabs[2]:
-    st.subheader("Управление моделями")
+    st.subheader("Быстрая аналитика по продажам")
+    raw_path = data_raw / 'sales_synth.csv'
+    if not raw_path.exists():
+        st.info("Сначала сгенерируй данные во вкладке «Данные».")
+    else:
+        df = pd.read_csv(raw_path, parse_dates=['date'])
+        skus = df['sku_id'].unique().tolist()
+        sku_a = st.selectbox("SKU для анализа", skus)
+        tail = df[df['sku_id'] == sku_a].sort_values('date').tail(180)
+        tail['rolling'] = tail['units'].rolling(14, min_periods=1).mean()
 
+        fig, ax = plt.subplots(figsize=(10,3.5))
+        ax.plot(tail['date'], tail['units'], label='Факт', alpha=0.5)
+        ax.plot(tail['date'], tail['rolling'], label='Тренд (14д)', linewidth=2)
+        ax.legend()
+        ax.set_title(f"Динамика продаж ({sku_a})")
+        st.pyplot(fig)
+
+# =====================================================================
+# ⚙️ МОДЕЛИ
+# =====================================================================
+with tabs[3]:
+    st.subheader("Обучение моделей")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button('Обучить Prophet (по каждому SKU)'):
+        if st.button('Обучить Prophet'):
             os.system('python -m src.models.train_prophet')
-            st.success('Модели Prophet обучены!')
+            st.success('✅ Prophet обучен!')
     with c2:
         if st.button('Обучить LightGBM'):
             os.system('python -m src.models.train_lgbm')
-            st.success('Модель LightGBM обучена!')
-
-    st.caption("После обучения можно перейти на вкладку «Прогноз» для визуализации или «Метрики» для оценки точности.")
+            st.success('✅ LightGBM обучен!')
 
 # =====================================================================
-# 📐 Вкладка 4. МЕТРИКИ
+# 🧮 МЕТРИКИ
 # =====================================================================
-with tabs[3]:
-    st.subheader("Оценка точности моделей")
+with tabs[4]:
+    st.subheader("Метрики и сравнение моделей")
 
     metrics_path = data_proc / 'metrics.csv'
-    raw_path = data_raw / 'sales_synth.csv'
+    if st.button("Пересчитать метрики (14 дней)"):
+        os.system("python -m src.models.evaluate --horizon 14")
+        st.success('✅ Метрики пересчитаны!')
 
-    c1, c2, _ = st.columns([1, 1, 2])
-    with c1:
-        horizon_eval = st.slider("Горизонт (дней)", 7, 60, 14, key="eval_hor")
-    with c2:
-        if st.button("Пересчитать метрики"):
-            os.system(f'python -m src.models.evaluate --horizon {horizon_eval}')
-            st.success(f'Метрики обновлены для горизонта {horizon_eval} дней')
-
-    if not metrics_path.exists():
-        st.info("Метрик пока нет. Нажми «Пересчитать метрики».")
-    else:
+    if metrics_path.exists():
         met = pd.read_csv(metrics_path)
-        st.write(f"Строк: {len(met):,}")
         st.dataframe(met, width='stretch')
-
-        st.markdown("**Доля лучших по MAPE (Prophet / LGBM / Naive):**")
-        summary = (
-            met['best_model']
-            .value_counts(normalize=True)
+        st.markdown("### Доля побед по MAPE")
+        leaderboard = (
+            met['best_model'].value_counts(normalize=True)
             .mul(100).round(1)
             .rename_axis('model').reset_index(name='%')
         )
-        st.dataframe(summary, width='stretch')
-
-        if raw_path.exists():
-            df_raw_ = pd.read_csv(raw_path)
-            sku_list = df_raw_['sku_id'].unique().tolist()
-            sel_sku = st.selectbox("Сравнение по SKU", sku_list, key="metric_sku")
-            row = met[met['sku_id'] == sel_sku].head(1)
-            if not row.empty:
-                m_prophet = float(row['mape_prophet'].iloc[0]) if 'mape_prophet' in row else float('nan')
-                m_lgbm   = float(row['mape_lgbm'].iloc[0]) if 'mape_lgbm' in row else float('nan')
-                m_naive  = float(row['mape_naive'].iloc[0]) if 'mape_naive' in row else float('nan')
-
-                st.caption(f"MAPE для {sel_sku}")
-                fig, ax = plt.subplots(figsize=(5, 3))
-                labels = ['Prophet', 'LGBM', 'Naive']
-                values = [m_prophet, m_lgbm, m_naive]
-                ax.bar(labels, values)
-                ax.set_ylabel('MAPE, %')
-                ax.set_ylim(0, max([v for v in values if pd.notna(v)] + [1]) * 1.2)
-                for i, v in enumerate(values):
-                    if pd.notna(v):
-                        ax.text(i, v, f"{v:.1f}%", ha='center', va='bottom')
-                st.pyplot(fig)
-
-        st.divider()
-        st.download_button(
-            label="⬇️ Скачать metrics.csv",
-            data=metrics_path.read_bytes(),
-            file_name="metrics.csv",
-            mime="text/csv"
-        )
-        best_filter = st.selectbox("Экспорт по лучшей модели (фильтр)", ['all', 'prophet', 'lgbm', 'naive'])
-        if best_filter != 'all':
-            met_filtered = met[met['best_model'].str.lower() == best_filter.lower()]
-            st.download_button(
-                label=f"⬇️ Скачать metrics_{best_filter}.csv",
-                data=met_filtered.to_csv(index=False).encode('utf-8'),
-                file_name=f"metrics_{best_filter}.csv",
-                mime="text/csv"
-            )
+        st.dataframe(leaderboard, width='stretch')
+    else:
+        st.info("Метрики пока не рассчитаны. Нажми кнопку выше.")

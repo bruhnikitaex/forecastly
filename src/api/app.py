@@ -1,43 +1,59 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import Optional
-import joblib
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from pathlib import Path
-from datetime import date, timedelta
+import pandas as pd
+import numpy as np
+import re
 
-app = FastAPI(title='Sales Forecasting API')
+app = FastAPI(title="Forecastly API", version="1.3")
 
-class PredictRequest(BaseModel):
-    horizon: int = 14
-    model: Optional[str] = None  # 'prophet' | 'lgbm' | None (оба)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], allow_credentials=True,
+    allow_methods=["*"], allow_headers=["*"],
+)
 
-@app.get('/health')
+PRED_PATH = Path("data/processed/processed.parquet/predictions.csv")
+RAW_PATH  = Path("data/raw/sales_synth.csv")
+
+
+def _load_csv(path: Path):
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+    df = pd.read_csv(path)
+    return df
+
+def _sanitize(df: pd.DataFrame) -> list[dict]:
+    df = df.copy()
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    df = df.where(pd.notna(df), None)
+    return jsonable_encoder(df.to_dict(orient="records"))
+
+@app.get("/")
+def root():
+    return {"name": "Forecastly API", "endpoints": ["/health", "/skus", "/predict"]}
+
+@app.get("/health")
 def health():
-    return {'status':'ok'}
+    return {"status": "ok"}
 
-@app.post('/predict')
-def predict(req: PredictRequest):
-    models_dir = Path('data/models')
-    out = []
-    names = ['prophet_model.pkl','lgbm_model.pkl'] if req.model is None else [f'{req.model}_model.pkl']
-    for name in names:
-        mp = models_dir / name
-        if not mp.exists():
-            out.append({'model': name.replace('_model.pkl',''), 'error': 'model_not_found'})
-            continue
-        if name.startswith('prophet'):
-            m = joblib.load(mp)
-            future = m.make_future_dataframe(periods=req.horizon, freq='D')
-            fcst = m.predict(future).tail(req.horizon)
-            out.append({'model':'prophet','dates':[str(x.date()) for x in fcst['ds']],
-                        'yhat': [round(float(v),2) for v in fcst['yhat']]})
-        else:
-            m = joblib.load(mp)
-            base = date.today()
-            # Для простоты демо используем псевдопрогноз (без фичей)
-            import random
-            rnd = random.Random(42)
-            y = [float(rnd.randint(20,60)) for _ in range(req.horizon)]
-            out.append({'model':'lgbm','dates':[str((base+timedelta(days=i)).isoformat()) for i in range(1, req.horizon+1)],
-                        'yhat': y})
-    return {'predictions': out}
+@app.get("/skus")
+def get_skus():
+    df = _load_csv(RAW_PATH)
+    return {"skus": sorted(df["sku_id"].astype(str).unique().tolist())}
+
+@app.get("/predict")
+def get_predict(sku_id: str = Query(..., description="SKU ID, напр. SKU_001"), horizon: int = 14):
+    dfp = _load_csv(PRED_PATH)
+    matches = [c for c in dfp["sku_id"].astype(str).unique() if c.lower() == sku_id.lower()]
+    if not matches:
+        raise HTTPException(status_code=404, detail=f"SKU {sku_id} not found")
+    sku = matches[0]
+    data = dfp[dfp["sku_id"] == sku].sort_values("date").tail(horizon)
+    if data.empty:
+        raise HTTPException(status_code=404, detail="No prediction data found.")
+    return JSONResponse(content=_sanitize(data))
