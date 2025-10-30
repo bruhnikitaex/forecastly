@@ -1,4 +1,4 @@
 data:
   raw: data/raw/sales_synth.csv
-  processed: data/processed/processed.parquet
+  processed: data/processed
   models_dir: data/models

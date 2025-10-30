@@ -1,3 +1,4 @@
+# src/models/predict.py
 import argparse
 import pandas as pd
 import numpy as np
@@ -13,9 +14,30 @@ from src.etl.clean_data import clean_sales
 from src.etl.feature_builder import build_features
 
 
+def normalize_sku(s: str) -> str:
+    """
+    Приводим ВСЁ к виду SKUxxx (без подчёркивания),
+    потому что в дашборде используется именно такой формат.
+    """
+    s = str(s).strip().upper()
+    # убираем возможные варианты
+    s = s.replace("SKU_", "SKU")
+    s = s.replace("SKU-", "SKU")
+    if s.startswith("SKU"):
+        num = s[3:]
+        num = "".join(ch for ch in num if ch.isdigit())
+        return f"SKU{num.zfill(3)}"
+    # если вдруг совсем другой формат
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if digits:
+        return f"SKU{digits.zfill(3)}"
+    return s
+
+
 def predict(horizon: int = 14):
-    """Создание прогноза для всех SKU."""
     logger.info(f"Start predicting, horizon={horizon}")
+
+    # 1. загрузили и подготовили данные
     df = load_sales()
     df = clean_sales(df)
     df = build_features(df)
@@ -23,69 +45,85 @@ def predict(horizon: int = 14):
 
     results = []
 
+    # 2. проходимся по каждому SKU
     for sku, g in df.groupby('sku_id'):
+        sku_norm = normalize_sku(sku)
         g = g.sort_values('date')
         last_date = g['date'].max()
 
-        # Prophet
+        # -------- Prophet --------
         try:
             m = Prophet()
-            df_p = g[['date','units']].rename(columns={'date':'ds','units':'y'})
+            df_p = g[['date', 'units']].rename(columns={'date': 'ds', 'units': 'y'})
             m.fit(df_p)
-            fut = pd.DataFrame({'ds':[last_date + pd.Timedelta(days=i) for i in range(1, horizon+1)]})
+            fut = pd.DataFrame({'ds': [last_date + pd.Timedelta(days=i) for i in range(1, horizon + 1)]})
             fc = m.predict(fut)
-            prophet_pred = fc[['ds','yhat','yhat_lower','yhat_upper']]
-            prophet_pred.columns = ['date','prophet','p_low','p_high']
+            prophet_pred = fc[['ds', 'yhat', 'yhat_lower', 'yhat_upper']]
+            prophet_pred.columns = ['date', 'prophet', 'p_low', 'p_high']
         except Exception as e:
-            logger.warning(f"Prophet failed on {sku}: {e}")
-            prophet_pred = pd.DataFrame(columns=['date','prophet','p_low','p_high'])
+            logger.warning(f"Prophet failed on {sku_norm}: {e}")
+            prophet_pred = pd.DataFrame(columns=['date', 'prophet', 'p_low', 'p_high'])
 
-        # LightGBM
+        # -------- LightGBM --------
         try:
             model_path = Path(PATHS['data']['models_dir']) / 'lgbm_model.pkl'
             model = joblib.load(model_path)
+
             g_feat = build_features(g.copy())
             last_rows = g_feat.tail(60).copy()
-            X_last = last_rows[['dow','week','month','units_lag_1','units_lag_7']].fillna(0)
+            X_last = last_rows[['dow', 'week', 'month', 'units_lag_1', 'units_lag_7']].fillna(0)
+
             preds = []
             cur = X_last.iloc[-1:].copy()
             for i in range(horizon):
                 p = model.predict(cur)[0]
-                preds.append(p)
+                preds.append(float(p))
                 # обновим лаги
                 cur['units_lag_1'] = p
-                cur['units_lag_7'] = preds[i-6] if i >= 6 else p
+                cur['units_lag_7'] = preds[i - 6] if i >= 6 else p
+
             lgbm_pred = pd.DataFrame({
-                'date': [last_date + pd.Timedelta(days=i+1) for i in range(horizon)],
+                'date': [last_date + pd.Timedelta(days=i + 1) for i in range(horizon)],
                 'lgbm': preds
             })
         except Exception as e:
-            logger.warning(f"LGBM failed on {sku}: {e}")
-            lgbm_pred = pd.DataFrame(columns=['date','lgbm'])
+            logger.warning(f"LGBM failed on {sku_norm}: {e}")
+            lgbm_pred = pd.DataFrame(columns=['date', 'lgbm'])
 
-        # Ensemble
+        # -------- Ensemble --------
         df_merge = pd.merge(prophet_pred, lgbm_pred, on='date', how='outer')
-        df_merge['ensemble'] = df_merge[['prophet','lgbm']].mean(axis=1)
-        df_merge['sku_id'] = sku
+        df_merge['ensemble'] = df_merge[['prophet', 'lgbm']].mean(axis=1)
+        df_merge['sku_id'] = sku_norm
         results.append(df_merge)
 
+    # 3. склеили всё
     all_pred = pd.concat(results, ignore_index=True)
 
-    # === Исправление: гарантируем, что processed — это директория ===
+    # 4. нормализуем путь (если в конфиге был кривой)
     base = Path(PATHS['data']['processed'])
+    # если в конфиге указано .../processed.parquet — берём родителя
+    if base.suffix:
+        base = base.parent
     if base.exists() and not base.is_dir():
-        base.unlink()  # если файл — удаляем
+        base.unlink()
     base.mkdir(parents=True, exist_ok=True)
 
+    # основной файл, который читает дашборд
     out_path = base / 'predictions.csv'
-
-    # сохраняем прогноз
     all_pred.to_csv(out_path, index=False)
+
+    # 5. сохраняем версию в историю
+    hist_dir = base / "history"
+    hist_dir.mkdir(parents=True, exist_ok=True)
+    ts = pd.Timestamp.utcnow().strftime("%Y-%m-%d_%H%M%S")
+    hist_path = hist_dir / f"predictions_{ts}.csv"
+    all_pred.to_csv(hist_path, index=False)
+
     logger.info(f"✅ Predictions saved to {out_path}")
+    logger.info(f"🗂  History saved to {hist_path}")
     print(f"✅ Predictions saved to {out_path}")
+    print(f"🗂  History saved to {hist_path}")
     return out_path
-
-
 
 
 if __name__ == "__main__":
