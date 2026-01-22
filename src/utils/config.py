@@ -66,15 +66,16 @@ def get_env_var(key: str, default: Any = None, var_type: type = str) -> Any:
         return default
 
 
-# Загружаем .env файл
+# Корневая директория проекта
 ROOT = Path(__file__).resolve().parents[2]
+
+# Загружаем .env файл
 env_file = ROOT / '.env'
 if env_file.exists():
     load_dotenv(env_file)
 
 
 # Загружаем основные конфиги
-ROOT = Path(__file__).resolve().parents[2]
 PATHS = load_config(str(ROOT / 'configs' / 'paths.yaml'))
 MODEL_CFG = load_config(str(ROOT / 'configs' / 'model.yaml'))
 
@@ -84,20 +85,20 @@ PATHS['data']['processed'] = get_env_var('DATA_PROCESSED_DIR', PATHS['data'].get
 PATHS['data']['models_dir'] = get_env_var('MODELS_DIR', PATHS['data'].get('models_dir', 'data/models'))
 
 # Переопределяем параметры моделей из env если установлены
-if 'model' in MODEL_CFG and 'lgbm' in MODEL_CFG['model']:
-    MODEL_CFG['model']['lgbm']['n_estimators'] = get_env_var(
-        'LGBM_N_ESTIMATORS',
-        MODEL_CFG['model']['lgbm'].get('n_estimators', 500),
+if 'model' in MODEL_CFG and 'xgboost' in MODEL_CFG['model']:
+    MODEL_CFG['model']['xgboost']['n_estimators'] = get_env_var(
+        'XGBOOST_N_ESTIMATORS',
+        MODEL_CFG['model']['xgboost'].get('n_estimators', 500),
         int
     )
-    MODEL_CFG['model']['lgbm']['learning_rate'] = get_env_var(
-        'LGBM_LEARNING_RATE',
-        MODEL_CFG['model']['lgbm'].get('learning_rate', 0.05),
+    MODEL_CFG['model']['xgboost']['learning_rate'] = get_env_var(
+        'XGBOOST_LEARNING_RATE',
+        MODEL_CFG['model']['xgboost'].get('learning_rate', 0.05),
         float
     )
-    MODEL_CFG['model']['lgbm']['num_leaves'] = get_env_var(
-        'LGBM_NUM_LEAVES',
-        MODEL_CFG['model']['lgbm'].get('num_leaves', 31),
+    MODEL_CFG['model']['xgboost']['max_depth'] = get_env_var(
+        'XGBOOST_MAX_DEPTH',
+        MODEL_CFG['model']['xgboost'].get('max_depth', 6),
         int
     )
 

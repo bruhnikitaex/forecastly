@@ -1,4 +1,10 @@
 # src/models/predict.py
+"""
+Модуль прогнозирования продаж.
+
+Использует предобученные модели Prophet и XGBoost для генерации прогнозов.
+Если модели не найдены - обучает их на лету.
+"""
 import argparse
 import pandas as pd
 import numpy as np
@@ -33,6 +39,24 @@ def normalize_sku(s) -> str:
     return s
 
 
+def load_prophet_models() -> dict:
+    """
+    Загружает предобученные модели Prophet.
+
+    Returns:
+        Словарь {sku_id: Prophet_model} или пустой словарь.
+    """
+    model_path = Path(PATHS['data']['models_dir']) / 'prophet_model.pkl'
+    if model_path.exists():
+        try:
+            models = joblib.load(model_path)
+            logger.info(f"Загружено {len(models)} предобученных Prophet моделей")
+            return models
+        except Exception as e:
+            logger.warning(f"Не удалось загрузить Prophet модели: {e}")
+    return {}
+
+
 def predict(horizon: int = 14):
     logger.info(f"Start predicting, horizon={horizon}")
 
@@ -41,6 +65,9 @@ def predict(horizon: int = 14):
     df = clean_sales(df)
     df = build_features(df)
     df = df.sort_values(['sku_id', 'store_id', 'date'])
+
+    # Загружаем предобученные модели
+    prophet_models = load_prophet_models()
 
     results = []
 
@@ -52,9 +79,20 @@ def predict(horizon: int = 14):
 
         # -------- Prophet --------
         try:
-            m = Prophet()
-            df_p = g[['date', 'units']].rename(columns={'date': 'ds', 'units': 'y'})
-            m.fit(df_p)
+            # Пытаемся использовать предобученную модель
+            if sku in prophet_models:
+                m = prophet_models[sku]
+                logger.debug(f"Используем предобученную модель Prophet для {sku_norm}")
+            elif sku_norm in prophet_models:
+                m = prophet_models[sku_norm]
+                logger.debug(f"Используем предобученную модель Prophet для {sku_norm}")
+            else:
+                # Обучаем новую модель если нет предобученной
+                logger.info(f"Обучение новой Prophet модели для {sku_norm}")
+                m = Prophet()
+                df_p = g[['date', 'units']].rename(columns={'date': 'ds', 'units': 'y'})
+                m.fit(df_p)
+
             fut = pd.DataFrame({'ds': [last_date + pd.Timedelta(days=i) for i in range(1, horizon + 1)]})
             fc = m.predict(fut)
             prophet_pred = fc[['ds', 'yhat', 'yhat_lower', 'yhat_upper']]

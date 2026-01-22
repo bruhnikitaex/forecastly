@@ -13,6 +13,12 @@ services:
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO
       - PYTHONUNBUFFERED=1
+      - USE_DATABASE=true
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=forecastly
+      - POSTGRES_USER=forecastly
+      - POSTGRES_PASSWORD=forecastly_dev_password
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
