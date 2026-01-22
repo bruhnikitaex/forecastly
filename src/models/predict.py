@@ -5,7 +5,6 @@ import numpy as np
 from pathlib import Path
 import joblib
 from prophet import Prophet
-from lightgbm import LGBMRegressor
 
 from src.utils.logger import logger
 from src.utils.config import PATHS
@@ -14,7 +13,7 @@ from src.etl.clean_data import clean_sales
 from src.etl.feature_builder import build_features
 
 
-def normalize_sku(s: str) -> str:
+def normalize_sku(s) -> str:
     """
     Приводим ВСЁ к виду SKUxxx (без подчёркивания),
     потому что в дашборде используется именно такой формат.
@@ -64,9 +63,9 @@ def predict(horizon: int = 14):
             logger.warning(f"Prophet failed on {sku_norm}: {e}")
             prophet_pred = pd.DataFrame(columns=['date', 'prophet', 'p_low', 'p_high'])
 
-        # -------- LightGBM --------
+        # -------- XGBoost --------
         try:
-            model_path = Path(PATHS['data']['models_dir']) / 'lgbm_model.pkl'
+            model_path = Path(PATHS['data']['models_dir']) / 'xgboost_model.pkl'
             model = joblib.load(model_path)
 
             g_feat = build_features(g.copy())
@@ -82,17 +81,17 @@ def predict(horizon: int = 14):
                 cur['units_lag_1'] = p
                 cur['units_lag_7'] = preds[i - 6] if i >= 6 else p
 
-            lgbm_pred = pd.DataFrame({
+            xgb_pred = pd.DataFrame({
                 'date': [last_date + pd.Timedelta(days=i + 1) for i in range(horizon)],
-                'lgbm': preds
+                'xgb': preds
             })
         except Exception as e:
-            logger.warning(f"LGBM failed on {sku_norm}: {e}")
-            lgbm_pred = pd.DataFrame(columns=['date', 'lgbm'])
+            logger.warning(f"XGBoost failed on {sku_norm}: {e}")
+            xgb_pred = pd.DataFrame(columns=['date', 'xgb'])
 
         # -------- Ensemble --------
-        df_merge = pd.merge(prophet_pred, lgbm_pred, on='date', how='outer')
-        df_merge['ensemble'] = df_merge[['prophet', 'lgbm']].mean(axis=1)
+        df_merge = pd.merge(prophet_pred, xgb_pred, on='date', how='outer')
+        df_merge['ensemble'] = df_merge[['prophet', 'xgb']].mean(axis=1)
         df_merge['sku_id'] = sku_norm
         results.append(df_merge)
 

@@ -1,15 +1,36 @@
-pandas
-numpy
-scikit-learn
-lightgbm
-prophet
-matplotlib
-seaborn
-plotly
-fastapi
-uvicorn[standard]
-streamlit
-joblib
-pyyaml
-loguru
-pytest
+# Core data processing (compatible with Python 3.11+)
+pandas>=2.1.0
+numpy>=2.0.0
+scikit-learn>=1.4.0
+
+# Machine Learning models
+xgboost>=2.0.0
+prophet>=1.1.5
+
+# Visualization
+matplotlib>=3.8.0
+seaborn>=0.13.0
+plotly>=5.18.0
+
+# Web frameworks
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+streamlit>=1.29.0
+
+# Serialization and config
+joblib>=1.4.0
+pyyaml>=6.0.1
+python-dotenv>=1.0.0
+
+# Logging
+loguru>=0.7.2
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Development (optional)
+black>=24.0.0
+flake8>=7.0.0
+isort>=5.13.0
+mypy>=1.7.0

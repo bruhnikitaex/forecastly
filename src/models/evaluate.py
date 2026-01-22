@@ -25,7 +25,7 @@ def evaluate(horizon: int = 14):
     df = df.sort_values(['sku_id', 'store_id', 'date'])
 
     from prophet import Prophet
-    from lightgbm import LGBMRegressor
+    from xgboost import XGBRegressor
 
     results = []
 
@@ -49,40 +49,43 @@ def evaluate(horizon: int = 14):
         except Exception:
             y_p = np.full(len(test), np.nan)
 
-        # LGBM
+        # XGBoost
         try:
             X_cols = ['dow', 'week', 'month', 'units_lag_1', 'units_lag_7']
             train_feat = build_features(train.copy())
             test_feat = build_features(test.copy())
-            model = LGBMRegressor(
+            model = XGBRegressor(
                 n_estimators=200,
                 learning_rate=0.05,
-                num_leaves=31,
+                max_depth=6,
                 random_state=42
             )
             model.fit(train_feat[X_cols].fillna(0), train_feat['units'])
-            y_l = model.predict(test_feat[X_cols].fillna(0))
+            y_x = model.predict(test_feat[X_cols].fillna(0))
         except Exception:
-            y_l = np.full(len(test), np.nan)
+            y_x = np.full(len(test), np.nan)
 
         # Naive (последнее значение)
         y_n = np.full(len(test), train['units'].iloc[-1])
 
-        y_e = np.nanmean(np.vstack([y_p, y_l]), axis=0)
+        y_e = np.nanmean(np.vstack([
+            np.asarray(y_p),
+            np.asarray(y_x)
+        ]), axis=0)
         m_prophet = mape(test['units'], y_p)
-        m_lgbm = mape(test['units'], y_l)
+        m_xgb = mape(test['units'], y_x)
         m_naive = mape(test['units'], y_n)
         m_ens = mape(test['units'], y_e)
 
         best = min(
-            [('prophet', m_prophet), ('lgbm', m_lgbm), ('naive', m_naive), ('ens', m_ens)],
+            [('prophet', m_prophet), ('xgboost', m_xgb), ('naive', m_naive), ('ens', m_ens)],
             key=lambda x: (x[1] if not np.isnan(x[1]) else 999)
         )[0]
 
         results.append({
             'sku_id': sku,
             'mape_prophet': round(m_prophet, 2),
-            'mape_lgbm': round(m_lgbm, 2),
+            'mape_xgboost': round(m_xgb, 2),
             'mape_naive': round(m_naive, 2),
             'mape_ens': round(m_ens, 2),
             'best_model': best

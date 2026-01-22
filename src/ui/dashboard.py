@@ -1,4 +1,14 @@
-# src/ui/dashboard.py
+"""
+Streamlit дашборд для системы прогнозирования продаж Forecastly.
+
+Интерактивный интерфейс для:
+- Загрузки и просмотра данных
+- Выполнения ETL процесса
+- Обучения моделей
+- Просмотра прогнозов
+- Анализа метрик качества
+"""
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,12 +17,16 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 # ---------------------------------------------------------
-# базовая настройка
+# Базовая настройка Streamlit
 # ---------------------------------------------------------
 
-st.set_page_config(page_title='Forecastly', layout='wide')
+st.set_page_config(
+    page_title='Forecastly',
+    layout='wide',
+    initial_sidebar_state='expanded'
+)
 
-# каталоги
+# Каталоги для данных
 data_raw = Path('data/raw')
 data_proc = Path('data/processed')
 data_models = Path('data/models')
@@ -22,22 +36,99 @@ for p in [data_raw, data_proc, data_models, logs_dir]:
     p.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------
-# ФУНКЦИИ-ПРОВЕРКИ ДЛЯ СТАТУСОВ
+# Кэшированные функции загрузки данных
 # ---------------------------------------------------------
+
+@st.cache_data
 def has_raw() -> bool:
+    """Проверяет наличие сырых данных (кэшируется)."""
     return (data_raw / 'sales_synth.csv').exists() or any(data_raw.glob("*.csv")) or any(data_raw.glob("*.xlsx"))
 
+@st.cache_data
 def has_predictions() -> bool:
+    """Проверяет наличие файла прогнозов (кэшируется)."""
     return (data_proc / 'predictions.csv').exists()
 
+@st.cache_data
 def has_metrics() -> bool:
+    """Проверяет наличие файла метрик (кэшируется)."""
     return (data_proc / 'metrics.csv').exists()
 
+@st.cache_data
 def has_models() -> dict:
+    """Проверяет наличие обученных моделей (кэшируется)."""
     return {
         "prophet": (data_models / 'prophet_model.pkl').exists(),
-        "lgbm": (data_models / 'lgbm_model.pkl').exists()
+        "xgboost": (data_models / 'xgboost_model.pkl').exists()
     }
+
+@st.cache_data
+def load_raw_data(file_path: str = 'data/raw/sales_synth.csv') -> pd.DataFrame:
+    """
+    Загружает сырые данные с кэшированием.
+    
+    Args:
+        file_path: Путь к CSV файлу.
+    
+    Returns:
+        DataFrame с данными о продажах.
+    """
+    df = pd.read_csv(file_path, parse_dates=['date'])
+    return df
+
+@st.cache_data
+def load_predictions_data(file_path: str = 'data/processed/predictions.csv') -> pd.DataFrame:
+    """
+    Загружает прогнозы с кэшированием.
+    
+    Args:
+        file_path: Путь к файлу прогнозов.
+    
+    Returns:
+        DataFrame с прогнозами.
+    """
+    df = pd.read_csv(file_path, parse_dates=['date'])
+    return df
+
+@st.cache_data
+def load_metrics_data(file_path: str = 'data/processed/metrics.csv') -> pd.DataFrame:
+    """
+    Загружает метрики с кэшированием.
+    
+    Args:
+        file_path: Путь к файлу метрик.
+    
+    Returns:
+        DataFrame с метриками.
+    """
+    df = pd.read_csv(file_path)
+    return df
+
+@st.cache_resource
+def load_trained_model(model_type: str):
+    """
+    Загружает обученную модель с кэшированием как ресурс.
+    
+    Args:
+        model_type: Тип модели ('prophet' или 'xgboost').
+    
+    Returns:
+        Загруженная модель.
+    """
+    import joblib
+    
+    if model_type == 'prophet':
+        model_path = data_models / 'prophet_model.pkl'
+    elif model_type == 'xgboost':
+        model_path = data_models / 'xgboost_model.pkl'
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+    
+    if not model_path.exists():
+        st.error(f"Модель {model_type} не найдена по пути {model_path}")
+        return None
+    
+    return joblib.load(model_path)
 
 # ---------------------------------------------------------
 # САЙДБАР
@@ -91,10 +182,10 @@ with c4:
         txt.append("Prophet ✅")
     else:
         txt.append("Prophet ❌")
-    if models_state["lgbm"]:
-        txt.append("LGBM ✅")
+    if models_state["xgboost"]:
+        txt.append("XGBoost ✅")
     else:
-        txt.append("LGBM ❌")
+        txt.append("XGBoost ❌")
     st.markdown("<br>".join(txt), unsafe_allow_html=True)
 
 st.divider()
@@ -132,7 +223,8 @@ with tabs[0]:
 
     raw_path = data_raw / 'sales_synth.csv'
     if raw_path.exists():
-        df = pd.read_csv(raw_path, parse_dates=['date'])
+        # Используем кэшированную функцию загрузки
+        df = load_raw_data(str(raw_path))
         st.write(f'Строк: {len(df):,} | SKU: {df.sku_id.nunique()} | Магазинов: {df.store_id.nunique()}')
         st.dataframe(df.head(50), width='stretch')
     else:
@@ -180,8 +272,8 @@ with tabs[1]:
         with c3:
             models_selected = st.multiselect(
                 "Модели",
-                ["Ensemble", "Prophet", "LightGBM"],
-                default=["Ensemble", "Prophet", "LightGBM"]
+                ["Ensemble", "Prophet", "XGBoost"],
+                default=["Ensemble", "Prophet", "XGBoost"]
             )
 
         if st.button("Сделать прогноз"):
@@ -191,7 +283,8 @@ with tabs[1]:
         if not pred_path.exists():
             st.info("Файл с прогнозом не найден. Нажми «Сделать прогноз».")
         else:
-            df_pred = pd.read_csv(pred_path, parse_dates=['date'])
+            # Используем кэшированную функцию загрузки
+            df_pred = load_predictions_data(str(pred_path))
 
             # фактические данные
             df_true = df_raw[df_raw['sku_id'] == selected_sku].copy()
@@ -211,8 +304,8 @@ with tabs[1]:
                            "Перегенерируй прогноз с обновлённым predict.py.")
                 st.write("SKU, которые есть в прогнозе:", df_pred['sku_id'].unique().tolist())
             else:
-                MODEL_COL = {"Prophet": "prophet", "LightGBM": "lgbm", "Ensemble": "ensemble"}
-                color_map = {"prophet": "#00AEEF", "lgbm": "#F45B69", "ensemble": "#7AC74F"}
+                MODEL_COL = {"Prophet": "prophet", "XGBoost": "xgb", "Ensemble": "ensemble"}
+                color_map = {"prophet": "#00AEEF", "xgb": "#F45B69", "ensemble": "#7AC74F"}
 
                 fig, ax = plt.subplots(figsize=(11, 4))
                 ax.grid(True, alpha=0.3)
@@ -266,7 +359,8 @@ with tabs[2]:
     if not raw_path.exists():
         st.info("Сначала сгенерируй данные.")
     else:
-        df = pd.read_csv(raw_path, parse_dates=['date'])
+        # Используем кэшированную функцию
+        df = load_raw_data(str(raw_path))
         skus = df['sku_id'].unique().tolist()
         sku_a = st.selectbox("SKU для анализа", skus, key="anal_sku")
         tail = df[df['sku_id'] == sku_a].sort_values('date').tail(180)
@@ -291,9 +385,9 @@ with tabs[3]:
             os.system('python -m src.models.train_prophet')
             st.success('✅ Prophet обучен!')
     with c2:
-        if st.button('Обучить LightGBM'):
-            os.system('python -m src.models.train_lgbm')
-            st.success('✅ LightGBM обучен!')
+        if st.button('Обучить XGBoost'):
+            os.system('python -m src.models.train_xgboost')
+            st.success('✅ XGBoost обучен!')
 
     st.caption("После обучения можно перейти на вкладку «Прогноз» и пересчитать предсказания.")
 
@@ -313,7 +407,8 @@ with tabs[4]:
         st.caption("Метрики считаются на основе ретро-прогноза по каждому SKU.")
 
     if metrics_path.exists():
-        met = pd.read_csv(metrics_path)
+        # Используем кэшированную функцию для загрузки метрик
+        met = load_metrics_data(str(metrics_path))
         st.markdown("### Полная таблица метрик")
         st.dataframe(met, width='stretch')
 
@@ -336,14 +431,14 @@ with tabs[4]:
             with c1:
                 st.markdown(f"**Лучший алгоритм:** `{row['best_model'].iloc[0]}`")
                 st.write(f"MAPE Prophet: {row['mape_prophet'].iloc[0]:.1f}%")
-                st.write(f"MAPE LGBM: {row['mape_lgbm'].iloc[0]:.1f}%")
+                st.write(f"MAPE XGBoost: {row['mape_xgboost'].iloc[0]:.1f}%")
                 st.write(f"MAPE Naive: {row['mape_naive'].iloc[0]:.1f}%")
                 st.write(f"MAPE Ensemble: {row['mape_ens'].iloc[0]:.1f}%")
             with c2:
-                labels = ['Prophet','LGBM','Naive','Ensemble']
+                labels = ['Prophet','XGBoost','Naive','Ensemble']
                 vals = [
                     row['mape_prophet'].iloc[0],
-                    row['mape_lgbm'].iloc[0],
+                    row['mape_xgboost'].iloc[0],
                     row['mape_naive'].iloc[0],
                     row['mape_ens'].iloc[0],
                 ]
@@ -362,20 +457,20 @@ with tabs[4]:
 
         # важность признаков
         st.divider()
-        st.markdown("### Важность признаков LGBM")
+        st.markdown("### Важность признаков XGBoost")
         import joblib
-        model_path = data_models / 'lgbm_model.pkl'
+        model_path = data_models / 'xgboost_model.pkl'
         if model_path.exists():
             try:
-                lgbm = joblib.load(model_path)
-                importances = getattr(lgbm, 'feature_importances_', None)
-                names = getattr(lgbm, 'feature_name_', None)
+                xgb = joblib.load(model_path)
+                importances = getattr(xgb, 'feature_importances_', None)
+                names = getattr(xgb, 'feature_name_', None)
                 if importances is not None and names is not None:
                     fi = pd.DataFrame({'feature': names, 'importance': importances})
                     fi = fi.sort_values('importance', ascending=False).head(20)
                     figfi, axfi = plt.subplots(figsize=(8,5))
                     axfi.barh(fi['feature'][::-1], fi['importance'][::-1])
-                    axfi.set_title("Top-20 feature importance (LGBM)")
+                    axfi.set_title("Top-20 feature importance (XGBoost)")
                     st.pyplot(figfi)
                 else:
                     st.info("У модели LGBM нет информации о важности признаков.")
