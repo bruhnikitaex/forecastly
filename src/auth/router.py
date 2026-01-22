@@ -16,7 +16,7 @@ Endpoints:
 
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
@@ -271,7 +271,7 @@ def login(
     db_token = RefreshToken(
         token_hash=token_hash,
         user_id=user.id,
-        expires_at=datetime.utcnow() + timedelta(days=7)
+        expires_at=datetime.now(timezone.utc) + timedelta(days=7)
     )
     db.add(db_token)
     db.commit()
@@ -376,7 +376,7 @@ def login_json(
     db_token = RefreshToken(
         token_hash=token_hash,
         user_id=user.id,
-        expires_at=datetime.utcnow() + timedelta(days=7)
+        expires_at=datetime.now(timezone.utc) + timedelta(days=7)
     )
     db.add(db_token)
     db.commit()
@@ -424,7 +424,7 @@ def refresh_token(
             detail="Refresh token отозван или не найден"
         )
 
-    if db_token.expires_at < datetime.utcnow():
+    if db_token.expires_at < datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token истёк"
@@ -456,7 +456,7 @@ def refresh_token(
     new_db_token = RefreshToken(
         token_hash=new_token_hash,
         user_id=user.id,
-        expires_at=datetime.utcnow() + timedelta(days=7)
+        expires_at=datetime.now(timezone.utc) + timedelta(days=7)
     )
     db.add(new_db_token)
     db.commit()
@@ -590,7 +590,7 @@ def create_api_key(
     # Вычисляем дату истечения
     expires_at = None
     if key_data.expires_in_days:
-        expires_at = datetime.utcnow() + timedelta(days=key_data.expires_in_days)
+        expires_at = datetime.now(timezone.utc) + timedelta(days=key_data.expires_in_days)
 
     # Создаём запись
     api_key = APIKey(
@@ -823,7 +823,7 @@ def list_locked_accounts(
     Returns:
         Список пользователей с активной блокировкой
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Находим пользователей с активной блокировкой
     locked_users = db.query(User).filter(
@@ -881,7 +881,7 @@ def get_audit_log_entries(
     if limit > 500:
         limit = 500
 
-    start_date = datetime.utcnow() - timedelta(hours=hours)
+    start_date = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     logs = get_audit_logs(
         db=db,

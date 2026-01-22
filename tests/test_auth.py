@@ -8,7 +8,7 @@
 """
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Импорты для тестирования
 import sys
@@ -171,7 +171,7 @@ class TestAccountLockout:
     def test_account_locked(self):
         """Заблокированный аккаунт."""
         user = MockUser()
-        user.locked_until = datetime.utcnow() + timedelta(minutes=10)
+        user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=10)
 
         is_locked, remaining = check_account_lockout(user)
         assert is_locked
@@ -182,7 +182,7 @@ class TestAccountLockout:
     def test_account_lock_expired(self):
         """Истёкшая блокировка."""
         user = MockUser()
-        user.locked_until = datetime.utcnow() - timedelta(minutes=1)
+        user.locked_until = datetime.now(timezone.utc) - timedelta(minutes=1)
 
         is_locked, remaining = check_account_lockout(user)
         assert not is_locked
@@ -196,13 +196,13 @@ class TestAccountLockout:
     def test_should_reset_old_failed_login(self):
         """Сброс счётчика: старая неудачная попытка."""
         user = MockUser()
-        user.last_failed_login = datetime.utcnow() - timedelta(minutes=FAILED_LOGIN_RESET_MINUTES + 1)
+        user.last_failed_login = datetime.now(timezone.utc) - timedelta(minutes=FAILED_LOGIN_RESET_MINUTES + 1)
         assert should_reset_failed_attempts(user)
 
     def test_should_not_reset_recent_failed_login(self):
         """Не сбрасывать: недавняя неудачная попытка."""
         user = MockUser()
-        user.last_failed_login = datetime.utcnow() - timedelta(minutes=5)
+        user.last_failed_login = datetime.now(timezone.utc) - timedelta(minutes=5)
         assert not should_reset_failed_attempts(user)
 
     def test_lockout_constants(self):

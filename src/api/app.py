@@ -12,6 +12,7 @@ REST API для системы прогнозирования продаж Forec
 """
 
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -54,12 +55,35 @@ except Exception:
     DATA_RAW = Path("data/raw")
     DATA_PROC = Path("data/processed")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager для инициализации и завершения приложения."""
+    # Startup
+    logger.info("Запуск Forecastly API...")
+    if USE_DATABASE:
+        logger.info(f"Режим базы данных включён: {DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else 'SQLite'}")
+        try:
+            init_db()
+            logger.info("✓ База данных инициализирована")
+        except Exception as e:
+            logger.error(f"Ошибка инициализации БД: {e}")
+    else:
+        logger.info("Режим файловой системы (CSV/Parquet)")
+
+    yield
+
+    # Shutdown (если нужна очистка ресурсов)
+    logger.info("Остановка Forecastly API...")
+
+
 app = FastAPI(
     title="Forecastly API",
     description="API для системы анализа и прогнозирования продаж",
     version="1.1.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # Подключаем rate limiter
@@ -80,36 +104,25 @@ _environment = os.getenv('ENVIRONMENT', 'development').lower()
 if _cors_origins_env:
     # Используем заданные origins
     _cors_origins = [origin.strip() for origin in _cors_origins_env.split(',') if origin.strip()]
+    _cors_credentials = True
 elif _environment == 'production':
     # В production без явного указания - только localhost (безопасно)
     _cors_origins = ["http://localhost:8501", "http://localhost:3000"]
+    _cors_credentials = True
     logger.warning("CORS_ORIGINS не задан в production. Используются только localhost origins.")
 else:
     # В development разрешаем всё
+    # Примечание: wildcard "*" несовместим с credentials=True по спецификации CORS
     _cors_origins = ["*"]
+    _cors_credentials = False
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_credentials=_cors_credentials,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Инициализация при запуске приложения."""
-    logger.info("Запуск Forecastly API...")
-    if USE_DATABASE:
-        logger.info(f"Режим базы данных включён: {DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else 'SQLite'}")
-        try:
-            init_db()
-            logger.info("✓ База данных инициализирована")
-        except Exception as e:
-            logger.error(f"Ошибка инициализации БД: {e}")
-    else:
-        logger.info("Режим файловой системы (CSV/Parquet)")
 
 
 def _normalize_processed_path(p: Path) -> Path:

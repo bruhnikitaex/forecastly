@@ -64,6 +64,28 @@ def format_number(value: float, decimals: int = 2) -> str:
     return f"{value:,.{decimals}f}"
 
 
+def round_metrics(metrics: dict, decimals: int = 2) -> dict:
+    """
+    Округляет числовые значения в словаре метрик.
+
+    Args:
+        metrics: Словарь с метриками.
+        decimals: Количество знаков после запятой.
+
+    Returns:
+        Словарь с округлёнными значениями.
+    """
+    result = {}
+    for key, value in metrics.items():
+        if value is None:
+            result[key] = None
+        elif isinstance(value, (int, float)):
+            result[key] = round(value, decimals)
+        else:
+            result[key] = value
+    return result
+
+
 def validate_dataframe(df: pd.DataFrame, required_cols: list[str]) -> bool:
     """
     Проверяет наличие обязательных колонок в DataFrame.

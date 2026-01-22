@@ -8,12 +8,17 @@ SQLAlchemy модели для Forecastly.
 - Metric: метрики качества моделей
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import (
     Column, Integer, String, Float, DateTime, Date,
     ForeignKey, Boolean, Text, Index, UniqueConstraint
 )
 from sqlalchemy.orm import relationship, declarative_base
+
+
+def utcnow():
+    """Возвращает текущее время в UTC (timezone-aware)."""
+    return datetime.now(timezone.utc)
 
 Base = declarative_base()
 
@@ -40,8 +45,8 @@ class SKU(Base):
     category = Column(String(100), nullable=True)
     store_id = Column(String(50), default='default')
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     # Отношения
     predictions = relationship('Prediction', back_populates='sku', cascade='all, delete-orphan')
@@ -75,7 +80,7 @@ class ForecastRun(Base):
     horizon = Column(Integer, nullable=False, default=14)
     model_type = Column(String(50), default='ensemble')
     status = Column(String(20), default='running')  # running, completed, failed
-    started_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, default=utcnow)
     completed_at = Column(DateTime, nullable=True)
     error_message = Column(Text, nullable=True)
     records_count = Column(Integer, default=0)
@@ -118,7 +123,7 @@ class Prediction(Base):
     p_low = Column(Float, nullable=True)
     p_high = Column(Float, nullable=True)
     actual = Column(Float, nullable=True)  # Фактическое значение для сравнения
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     # Отношения
     sku = relationship('SKU', back_populates='predictions')
@@ -161,7 +166,7 @@ class Metric(Base):
     mape_ensemble = Column(Float, nullable=True)
     mape_naive = Column(Float, nullable=True)
     best_model = Column(String(20), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     # Отношения
     sku = relationship('SKU', back_populates='metrics')
@@ -195,7 +200,7 @@ class SalesHistory(Base):
     revenue = Column(Float, nullable=True)
     price = Column(Float, nullable=True)
     promo_flag = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     # Уникальное ограничение
     __table_args__ = (
@@ -236,7 +241,7 @@ class User(Base):
     is_superuser = Column(Boolean, default=False)
     role = Column(String(20), default='viewer')  # admin, analyst, viewer
     company = Column(String(255), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     last_login = Column(DateTime, nullable=True)
 
     # Account lockout fields
@@ -252,7 +257,7 @@ class User(Base):
         """Проверяет, заблокирован ли аккаунт."""
         if self.locked_until is None:
             return False
-        return datetime.utcnow() < self.locked_until
+        return datetime.now(timezone.utc) < self.locked_until
 
     def __repr__(self):
         return f"<User(email='{self.email}', role='{self.role}')>"
@@ -284,7 +289,7 @@ class APIKey(Base):
     is_active = Column(Boolean, default=True)
     expires_at = Column(DateTime, nullable=True)
     last_used_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     permissions = Column(Text, default='["read"]')  # JSON array: read, write, admin
 
     # Отношения
@@ -313,7 +318,7 @@ class RefreshToken(Base):
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
     expires_at = Column(DateTime, nullable=False)
     is_revoked = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     def __repr__(self):
         return f"<RefreshToken(user_id={self.user_id}, revoked={self.is_revoked})>"
@@ -346,7 +351,7 @@ class SecurityAuditLog(Base):
     user_agent = Column(String(500), nullable=True)
     details = Column(Text, nullable=True)  # JSON
     severity = Column(String(20), default='info')  # info, warning, critical
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
 
     # Индексы для быстрого поиска
     __table_args__ = (

@@ -6,7 +6,7 @@
 """
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 from sqlalchemy.orm import Session
 from fastapi import Request
@@ -377,7 +377,7 @@ def get_failed_login_attempts(
     """
     from sqlalchemy import func
 
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     results = db.query(
         SecurityAuditLog.ip_address,
@@ -408,7 +408,7 @@ def get_security_stats(db: Session, hours: int = 24) -> dict:
     """
     from sqlalchemy import func
 
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     # Подсчёт событий по типам
     event_counts = db.query(

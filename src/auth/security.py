@@ -5,7 +5,7 @@
 import os
 import secrets
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 
 from jose import jwt, JWTError
@@ -97,13 +97,13 @@ def create_access_token(
     to_encode = data.copy()
 
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode.update({
         "exp": expire,
-        "iat": datetime.utcnow(),
+        "iat": datetime.now(timezone.utc),
         "type": "access"
     })
 
@@ -128,13 +128,13 @@ def create_refresh_token(
     to_encode = data.copy()
 
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+        expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
 
     to_encode.update({
         "exp": expire,
-        "iat": datetime.utcnow(),
+        "iat": datetime.now(timezone.utc),
         "type": "refresh"
     })
 
@@ -352,7 +352,7 @@ def check_account_lockout(user) -> tuple[bool, Optional[int]]:
     if user.locked_until is None:
         return False, None
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if now < user.locked_until:
         remaining = (user.locked_until - now).total_seconds()
         return True, int(remaining)
@@ -376,7 +376,7 @@ def should_reset_failed_attempts(user) -> bool:
     if user.last_failed_login is None:
         return True
 
-    reset_threshold = datetime.utcnow() - timedelta(minutes=FAILED_LOGIN_RESET_MINUTES)
+    reset_threshold = datetime.now(timezone.utc) - timedelta(minutes=FAILED_LOGIN_RESET_MINUTES)
     return user.last_failed_login < reset_threshold
 
 
@@ -393,7 +393,7 @@ def record_failed_login(user, db_session) -> tuple[bool, Optional[datetime]]:
         - is_now_locked: True если аккаунт был заблокирован этой попыткой
         - locked_until: Время до которого заблокирован (или None)
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Сбрасываем счётчик если прошло достаточно времени
     if should_reset_failed_attempts(user):
@@ -429,7 +429,7 @@ def record_successful_login(user, db_session) -> None:
     user.failed_login_attempts = 0
     user.locked_until = None
     user.last_failed_login = None
-    user.last_login = datetime.utcnow()
+    user.last_login = datetime.now(timezone.utc)
     db_session.commit()
 
 

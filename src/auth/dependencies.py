@@ -3,7 +3,7 @@ FastAPI dependencies для аутентификации и авторизаци
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from functools import wraps
 
@@ -73,14 +73,14 @@ async def get_current_user(
 
         if db_key:
             # Проверяем срок действия
-            if db_key.expires_at and db_key.expires_at < datetime.utcnow():
+            if db_key.expires_at and db_key.expires_at < datetime.now(timezone.utc):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="API ключ истёк"
                 )
 
             # Обновляем время последнего использования
-            db_key.last_used_at = datetime.utcnow()
+            db_key.last_used_at = datetime.now(timezone.utc)
             db.commit()
 
             # Получаем пользователя
@@ -257,14 +257,14 @@ async def get_api_key_user(
             detail="Недействительный API ключ"
         )
 
-    if db_key.expires_at and db_key.expires_at < datetime.utcnow():
+    if db_key.expires_at and db_key.expires_at < datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="API ключ истёк"
         )
 
     # Обновляем время последнего использования
-    db_key.last_used_at = datetime.utcnow()
+    db_key.last_used_at = datetime.now(timezone.utc)
     db.commit()
 
     user = db.query(User).filter(User.id == db_key.user_id).first()

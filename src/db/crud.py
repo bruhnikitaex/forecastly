@@ -4,7 +4,7 @@ CRUD операции для работы с базой данных Forecastly.
 Предоставляет функции для создания, чтения, обновления и удаления данных.
 """
 
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional
 from uuid import uuid4
 import pandas as pd
@@ -85,7 +85,7 @@ def create_forecast_run(db: Session, horizon: int = 14,
         horizon=horizon,
         model_type=model_type,
         status='running',
-        started_at=datetime.utcnow()
+        started_at=datetime.now(timezone.utc)
     )
     db.add(run)
     db.commit()
@@ -100,7 +100,7 @@ def complete_forecast_run(db: Session, run_id: str,
     run = db.query(ForecastRun).filter(ForecastRun.run_id == run_id).first()
     if run:
         run.status = 'completed'
-        run.completed_at = datetime.utcnow()
+        run.completed_at = datetime.now(timezone.utc)
         run.records_count = records_count
         db.commit()
         logger.info(f"ForecastRun завершён: {run_id}, записей: {records_count}")
@@ -113,7 +113,7 @@ def fail_forecast_run(db: Session, run_id: str,
     run = db.query(ForecastRun).filter(ForecastRun.run_id == run_id).first()
     if run:
         run.status = 'failed'
-        run.completed_at = datetime.utcnow()
+        run.completed_at = datetime.now(timezone.utc)
         run.error_message = error_message
         db.commit()
         logger.error(f"ForecastRun провален: {run_id}, ошибка: {error_message}")
