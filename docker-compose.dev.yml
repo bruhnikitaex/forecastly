@@ -1,0 +1,87 @@
+# ============================================================================
+# Forecastly - Docker Compose для разработки
+# ============================================================================
+# Использование: docker-compose -f docker-compose.dev.yml up -d
+# Прямой доступ к сервисам без nginx (для отладки)
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # API сервер на FastAPI (с hot reload)
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: forecastly-api-dev
+    ports:
+      - "8000:8000"  # Прямой доступ для разработки
+    environment:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - PYTHONUNBUFFERED=1
+      - USE_DATABASE=true
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=forecastly
+      - POSTGRES_USER=forecastly
+      - POSTGRES_PASSWORD=dev_password_123
+      - SECRET_KEY=dev-secret-key-not-for-production
+      - RATE_LIMIT=1000/minute  # Мягкий лимит для разработки
+      - AUTH_RATE_LIMIT=100/minute
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./configs:/app/configs
+      - ./src:/app/src  # Hot reload для кода
+    command: uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      - db
+    networks:
+      - forecastly-dev-network
+
+  # Streamlit дашборд
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: forecastly-dashboard-dev
+    ports:
+      - "8501:8501"  # Прямой доступ для разработки
+    environment:
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - PYTHONUNBUFFERED=1
+      - API_URL=http://api:8000
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./configs:/app/configs
+      - ./src:/app/src
+    command: streamlit run src/ui/dashboard.py
+    depends_on:
+      - api
+    networks:
+      - forecastly-dev-network
+
+  # PostgreSQL
+  db:
+    image: postgres:15-alpine
+    container_name: forecastly-db-dev
+    environment:
+      - POSTGRES_DB=forecastly
+      - POSTGRES_USER=forecastly
+      - POSTGRES_PASSWORD=dev_password_123
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"  # Прямой доступ для отладки БД
+    networks:
+      - forecastly-dev-network
+
+volumes:
+  postgres_dev_data:
+
+networks:
+  forecastly-dev-network:
+    driver: bridge

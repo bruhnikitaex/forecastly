@@ -12,8 +12,9 @@ REST API для системы прогнозирования продаж Forec
 """
 
 import os
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pathlib import Path
 import subprocess
 import pandas as pd
@@ -22,8 +23,18 @@ from datetime import datetime
 from typing import Optional
 from sqlalchemy.orm import Session
 
+# Rate limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
 from src.utils.config import PATHS
 from src.utils.logger import logger
+
+# Инициализация rate limiter
+# Лимиты настраиваются через RATE_LIMIT env variable (формат: "100/minute")
+_rate_limit = os.getenv('RATE_LIMIT', '100/minute')
+limiter = Limiter(key_func=get_remote_address, default_limits=[_rate_limit])
 
 # Проверяем, включена ли база данных
 USE_DATABASE = os.getenv('USE_DATABASE', 'false').lower() == 'true'
@@ -31,6 +42,8 @@ USE_DATABASE = os.getenv('USE_DATABASE', 'false').lower() == 'true'
 if USE_DATABASE:
     from src.db.database import get_db, init_db, check_connection, DATABASE_URL
     from src.db import crud
+    # Импортируем auth router только если БД включена
+    from src.auth.router import router as auth_router, auth_limiter
 
 # конфиг
 try:
@@ -49,13 +62,38 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS middleware
+# Подключаем rate limiter
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Подключаем auth router (только если БД включена)
+if USE_DATABASE:
+    app.include_router(auth_router, prefix="/api/v1")
+    # Добавляем auth limiter state
+    app.state.auth_limiter = auth_limiter
+
+# CORS middleware - настраивается через переменные окружения
+# В production задайте CORS_ORIGINS="https://yourdomain.com,https://app.yourdomain.com"
+_cors_origins_env = os.getenv('CORS_ORIGINS', '')
+_environment = os.getenv('ENVIRONMENT', 'development').lower()
+
+if _cors_origins_env:
+    # Используем заданные origins
+    _cors_origins = [origin.strip() for origin in _cors_origins_env.split(',') if origin.strip()]
+elif _environment == 'production':
+    # В production без явного указания - только localhost (безопасно)
+    _cors_origins = ["http://localhost:8501", "http://localhost:3000"]
+    logger.warning("CORS_ORIGINS не задан в production. Используются только localhost origins.")
+else:
+    # В development разрешаем всё
+    _cors_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
 
 

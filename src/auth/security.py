@@ -18,13 +18,28 @@ from src.utils.logger import logger
 # CONFIGURATION
 # ============================================================================
 
-# Секретный ключ для JWT (ОБЯЗАТЕЛЬНО заменить в production!)
-SECRET_KEY = os.getenv('SECRET_KEY', 'forecastly-dev-secret-key-change-in-production-2024')
+# Секретный ключ для JWT
+_DEFAULT_SECRET_KEY = 'forecastly-dev-secret-key-change-in-production-2024'
+SECRET_KEY = os.getenv('SECRET_KEY', _DEFAULT_SECRET_KEY)
 ALGORITHM = "HS256"
+
+# Проверка безопасности: запрет использования default ключа в production
+_ENVIRONMENT = os.getenv('ENVIRONMENT', 'development').lower()
+if _ENVIRONMENT == 'production' and SECRET_KEY == _DEFAULT_SECRET_KEY:
+    raise RuntimeError(
+        "КРИТИЧЕСКАЯ ОШИБКА БЕЗОПАСНОСТИ: SECRET_KEY не задан в production!\n"
+        "Установите переменную окружения SECRET_KEY с надёжным случайным значением.\n"
+        "Пример: export SECRET_KEY=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+    )
 
 # Время жизни токенов
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES', '30'))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv('REFRESH_TOKEN_EXPIRE_DAYS', '7'))
+
+# Account Lockout настройки
+MAX_FAILED_LOGIN_ATTEMPTS = int(os.getenv('MAX_FAILED_LOGIN_ATTEMPTS', '5'))
+LOCKOUT_DURATION_MINUTES = int(os.getenv('LOCKOUT_DURATION_MINUTES', '15'))
+FAILED_LOGIN_RESET_MINUTES = int(os.getenv('FAILED_LOGIN_RESET_MINUTES', '60'))
 
 # Контекст для хэширования паролей (bcrypt)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -235,26 +250,199 @@ def generate_random_password(length: int = 16) -> str:
     return secrets.token_urlsafe(length)
 
 
-def is_password_strong(password: str) -> tuple[bool, str]:
+# Password Policy настройки
+MIN_PASSWORD_LENGTH = int(os.getenv('MIN_PASSWORD_LENGTH', '8'))
+REQUIRE_UPPERCASE = os.getenv('REQUIRE_PASSWORD_UPPERCASE', 'true').lower() == 'true'
+REQUIRE_LOWERCASE = os.getenv('REQUIRE_PASSWORD_LOWERCASE', 'true').lower() == 'true'
+REQUIRE_DIGIT = os.getenv('REQUIRE_PASSWORD_DIGIT', 'true').lower() == 'true'
+REQUIRE_SPECIAL = os.getenv('REQUIRE_PASSWORD_SPECIAL', 'false').lower() == 'true'
+
+# Список распространённых паролей для проверки
+COMMON_PASSWORDS = {
+    'password', 'password123', '123456', '12345678', 'qwerty', 'abc123',
+    'monkey', 'master', 'dragon', 'letmein', 'login', 'admin', 'welcome',
+    'password1', 'p@ssw0rd', 'passw0rd', 'qwerty123', 'iloveyou', 'princess',
+    'sunshine', 'football', 'baseball', 'superman', 'trustno1', 'access',
+}
+
+
+def is_password_strong(password: str) -> tuple[bool, list[str]]:
     """
-    Проверяет надёжность пароля.
+    Проверяет надёжность пароля по настроенной политике.
 
     Args:
         password: Пароль для проверки
 
     Returns:
-        Кортеж (is_valid, message)
+        Кортеж (is_valid, errors):
+        - is_valid: True если пароль соответствует политике
+        - errors: Список ошибок (пустой если пароль валиден)
     """
-    if len(password) < 8:
-        return False, "Пароль должен быть не менее 8 символов"
+    errors = []
 
-    if not any(c.isupper() for c in password):
-        return False, "Пароль должен содержать заглавную букву"
+    # Проверка длины
+    if len(password) < MIN_PASSWORD_LENGTH:
+        errors.append(f"Пароль должен быть не менее {MIN_PASSWORD_LENGTH} символов")
 
-    if not any(c.islower() for c in password):
-        return False, "Пароль должен содержать строчную букву"
+    # Проверка заглавных букв
+    if REQUIRE_UPPERCASE and not any(c.isupper() for c in password):
+        errors.append("Пароль должен содержать заглавную букву")
 
-    if not any(c.isdigit() for c in password):
-        return False, "Пароль должен содержать цифру"
+    # Проверка строчных букв
+    if REQUIRE_LOWERCASE and not any(c.islower() for c in password):
+        errors.append("Пароль должен содержать строчную букву")
 
-    return True, "OK"
+    # Проверка цифр
+    if REQUIRE_DIGIT and not any(c.isdigit() for c in password):
+        errors.append("Пароль должен содержать цифру")
+
+    # Проверка специальных символов
+    if REQUIRE_SPECIAL:
+        special_chars = set('!@#$%^&*()_+-=[]{}|;:,.<>?')
+        if not any(c in special_chars for c in password):
+            errors.append("Пароль должен содержать специальный символ (!@#$%^&*...)")
+
+    # Проверка на распространённые пароли
+    if password.lower() in COMMON_PASSWORDS:
+        errors.append("Этот пароль слишком распространённый, выберите другой")
+
+    # Проверка на повторяющиеся символы (например, 'aaaa')
+    if len(password) >= 4:
+        for i in range(len(password) - 3):
+            if password[i] == password[i+1] == password[i+2] == password[i+3]:
+                errors.append("Пароль не должен содержать 4+ одинаковых символа подряд")
+                break
+
+    return len(errors) == 0, errors
+
+
+def get_password_policy() -> dict:
+    """
+    Возвращает текущую политику паролей.
+
+    Returns:
+        Словарь с настройками политики
+    """
+    return {
+        "min_length": MIN_PASSWORD_LENGTH,
+        "require_uppercase": REQUIRE_UPPERCASE,
+        "require_lowercase": REQUIRE_LOWERCASE,
+        "require_digit": REQUIRE_DIGIT,
+        "require_special": REQUIRE_SPECIAL,
+        "common_passwords_blocked": True
+    }
+
+
+# ============================================================================
+# ACCOUNT LOCKOUT
+# ============================================================================
+
+def check_account_lockout(user) -> tuple[bool, Optional[int]]:
+    """
+    Проверяет, заблокирован ли аккаунт.
+
+    Args:
+        user: Объект пользователя из БД
+
+    Returns:
+        Кортеж (is_locked, remaining_seconds):
+        - is_locked: True если аккаунт заблокирован
+        - remaining_seconds: Оставшееся время блокировки в секундах (или None)
+    """
+    if user.locked_until is None:
+        return False, None
+
+    now = datetime.utcnow()
+    if now < user.locked_until:
+        remaining = (user.locked_until - now).total_seconds()
+        return True, int(remaining)
+
+    return False, None
+
+
+def should_reset_failed_attempts(user) -> bool:
+    """
+    Проверяет, нужно ли сбросить счётчик неудачных попыток.
+
+    Счётчик сбрасывается если прошло достаточно времени с последней
+    неудачной попытки (FAILED_LOGIN_RESET_MINUTES).
+
+    Args:
+        user: Объект пользователя из БД
+
+    Returns:
+        True если нужно сбросить счётчик
+    """
+    if user.last_failed_login is None:
+        return True
+
+    reset_threshold = datetime.utcnow() - timedelta(minutes=FAILED_LOGIN_RESET_MINUTES)
+    return user.last_failed_login < reset_threshold
+
+
+def record_failed_login(user, db_session) -> tuple[bool, Optional[datetime]]:
+    """
+    Записывает неудачную попытку входа и проверяет необходимость блокировки.
+
+    Args:
+        user: Объект пользователя из БД
+        db_session: Сессия SQLAlchemy
+
+    Returns:
+        Кортеж (is_now_locked, locked_until):
+        - is_now_locked: True если аккаунт был заблокирован этой попыткой
+        - locked_until: Время до которого заблокирован (или None)
+    """
+    now = datetime.utcnow()
+
+    # Сбрасываем счётчик если прошло достаточно времени
+    if should_reset_failed_attempts(user):
+        user.failed_login_attempts = 0
+
+    # Увеличиваем счётчик
+    user.failed_login_attempts += 1
+    user.last_failed_login = now
+
+    # Проверяем, достигнут ли лимит
+    if user.failed_login_attempts >= MAX_FAILED_LOGIN_ATTEMPTS:
+        user.locked_until = now + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+        db_session.commit()
+        logger.warning(
+            f"[SECURITY] Аккаунт заблокирован: {user.email} | "
+            f"Попыток: {user.failed_login_attempts} | "
+            f"Заблокирован до: {user.locked_until.isoformat()}"
+        )
+        return True, user.locked_until
+
+    db_session.commit()
+    return False, None
+
+
+def record_successful_login(user, db_session) -> None:
+    """
+    Записывает успешный вход и сбрасывает счётчик неудачных попыток.
+
+    Args:
+        user: Объект пользователя из БД
+        db_session: Сессия SQLAlchemy
+    """
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    user.last_failed_login = None
+    user.last_login = datetime.utcnow()
+    db_session.commit()
+
+
+def unlock_account(user, db_session) -> None:
+    """
+    Разблокирует аккаунт (для админов).
+
+    Args:
+        user: Объект пользователя из БД
+        db_session: Сессия SQLAlchemy
+    """
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    user.last_failed_login = None
+    db_session.commit()
+    logger.info(f"[SECURITY] Аккаунт разблокирован администратором: {user.email}")

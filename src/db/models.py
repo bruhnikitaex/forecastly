@@ -222,6 +222,9 @@ class User(Base):
         company: Название компании
         created_at: Дата регистрации
         last_login: Последний вход
+        failed_login_attempts: Счётчик неудачных попыток входа
+        locked_until: Время до которого аккаунт заблокирован
+        last_failed_login: Время последней неудачной попытки
     """
     __tablename__ = 'users'
 
@@ -236,8 +239,20 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
 
+    # Account lockout fields
+    failed_login_attempts = Column(Integer, default=0)
+    locked_until = Column(DateTime, nullable=True)
+    last_failed_login = Column(DateTime, nullable=True)
+
     # Отношения
     api_keys = relationship('APIKey', back_populates='user', cascade='all, delete-orphan')
+
+    @property
+    def is_locked(self) -> bool:
+        """Проверяет, заблокирован ли аккаунт."""
+        if self.locked_until is None:
+            return False
+        return datetime.utcnow() < self.locked_until
 
     def __repr__(self):
         return f"<User(email='{self.email}', role='{self.role}')>"
@@ -302,3 +317,77 @@ class RefreshToken(Base):
 
     def __repr__(self):
         return f"<RefreshToken(user_id={self.user_id}, revoked={self.is_revoked})>"
+
+
+class SecurityAuditLog(Base):
+    """
+    Журнал событий безопасности.
+
+    Хранит все важные события для аудита и анализа инцидентов.
+
+    Attributes:
+        id: Первичный ключ
+        event_type: Тип события (login_success, login_failed, account_locked, etc.)
+        user_id: ID пользователя (если применимо)
+        user_email: Email пользователя (для поиска даже если пользователь удалён)
+        ip_address: IP адрес клиента
+        user_agent: User-Agent браузера/клиента
+        details: JSON с дополнительными деталями
+        severity: Уровень важности (info, warning, critical)
+        created_at: Время события
+    """
+    __tablename__ = 'security_audit_logs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_type = Column(String(50), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True, index=True)
+    user_email = Column(String(255), nullable=True, index=True)
+    ip_address = Column(String(45), nullable=True)  # IPv6 может быть до 45 символов
+    user_agent = Column(String(500), nullable=True)
+    details = Column(Text, nullable=True)  # JSON
+    severity = Column(String(20), default='info')  # info, warning, critical
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    # Индексы для быстрого поиска
+    __table_args__ = (
+        Index('ix_audit_event_created', 'event_type', 'created_at'),
+        Index('ix_audit_user_created', 'user_id', 'created_at'),
+        Index('ix_audit_severity_created', 'severity', 'created_at'),
+    )
+
+    def __repr__(self):
+        return f"<SecurityAuditLog(event='{self.event_type}', user='{self.user_email}', severity='{self.severity}')>"
+
+
+# Константы для типов событий
+class AuditEventType:
+    """Типы событий для аудита."""
+    # Аутентификация
+    LOGIN_SUCCESS = 'login_success'
+    LOGIN_FAILED = 'login_failed'
+    LOGOUT = 'logout'
+    TOKEN_REFRESH = 'token_refresh'
+
+    # Блокировка аккаунта
+    ACCOUNT_LOCKED = 'account_locked'
+    ACCOUNT_UNLOCKED = 'account_unlocked'
+
+    # Регистрация и профиль
+    USER_REGISTERED = 'user_registered'
+    PASSWORD_CHANGED = 'password_changed'
+    PASSWORD_CHANGE_FAILED = 'password_change_failed'
+    PROFILE_UPDATED = 'profile_updated'
+
+    # API ключи
+    API_KEY_CREATED = 'api_key_created'
+    API_KEY_DELETED = 'api_key_deleted'
+    API_KEY_USED = 'api_key_used'
+
+    # Администрирование
+    USER_ROLE_CHANGED = 'user_role_changed'
+    USER_DEACTIVATED = 'user_deactivated'
+    USER_ACTIVATED = 'user_activated'
+
+    # Безопасность
+    SUSPICIOUS_ACTIVITY = 'suspicious_activity'
+    RATE_LIMIT_EXCEEDED = 'rate_limit_exceeded'
