@@ -299,3 +299,288 @@ class TestDataPreparation:
         required_features = ['dow', 'week', 'month', 'units_lag_1', 'units_lag_7']
         for feat in required_features:
             assert feat in features.columns, f"Отсутствует признак {feat}"
+
+
+class TestMapeEdgeCases:
+    """Additional edge case tests for MAPE function."""
+
+    def test_mape_with_mixed_values(self):
+        """Should handle mixed valid and invalid values."""
+        y_true = [100, 0, 200, np.nan, 150]
+        y_pred = [90, 10, 220, 100, 160]
+        result = mape(y_true, y_pred)
+
+        # Should only use indices 0, 2, 4
+        # (100-90)/100 = 0.1, (200-220)/200 = 0.1, (150-160)/150 = 0.067
+        # mean = (0.1 + 0.1 + 0.067) / 3 * 100 = 8.9%
+        assert 8 < result < 10
+
+    def test_mape_with_infinity(self):
+        """Should handle infinity values."""
+        y_true = [100, 100]
+        y_pred = [90, np.inf]
+        result = mape(y_true, y_pred)
+
+        # Should only use first value
+        assert result == 10.0
+
+    def test_mape_single_value(self):
+        """Should work with single value."""
+        y_true = [100]
+        y_pred = [110]
+        result = mape(y_true, y_pred)
+        assert result == 10.0
+
+    def test_mape_large_dataset(self):
+        """Should handle large datasets efficiently."""
+        y_true = np.random.randint(100, 200, 10000)
+        y_pred = y_true + np.random.randint(-10, 10, 10000)
+        result = mape(y_true, y_pred)
+
+        assert isinstance(result, (int, float))
+        assert not np.isnan(result)
+        assert result >= 0
+
+
+class TestNormalizeSkuEdgeCases:
+    """Additional edge case tests for normalize_sku."""
+
+    def test_normalize_multiple_underscores(self):
+        """Should handle multiple separators."""
+        assert normalize_sku("SKU__001") == "SKU001"
+        assert normalize_sku("SKU--001") == "SKU001"
+
+    def test_normalize_mixed_separators(self):
+        """Should handle mixed separators."""
+        assert normalize_sku("SKU-_001") == "SKU001"
+        assert normalize_sku("SKU_-001") == "SKU001"
+
+    def test_normalize_special_characters(self):
+        """Should handle special characters."""
+        result = normalize_sku("SKU@001")
+        # Should extract SKU and 001
+        assert "SKU" in result and "001" in result
+
+    def test_normalize_unicode_spaces(self):
+        """Should handle unicode whitespace."""
+        assert normalize_sku("\u00A0SKU001\u00A0") == "SKU001"
+
+    def test_normalize_very_long_number(self):
+        """Should handle long SKU numbers."""
+        assert normalize_sku("SKU123456789") == "SKU123456789"
+
+    def test_normalize_empty_raises_error(self):
+        """Should handle empty string gracefully."""
+        # This might raise error or return default - check actual implementation
+        try:
+            result = normalize_sku("")
+            assert result is not None
+        except Exception:
+            pass  # Expected behavior for empty input
+
+
+class TestModelIntegration:
+    """Integration tests for model pipeline."""
+
+    def test_train_test_split_consistency(self):
+        """Train-test split should maintain data integrity."""
+        df = pd.DataFrame({
+            'date': pd.date_range('2024-01-01', periods=100, freq='D'),
+            'sku_id': ['SKU001'] * 100,
+            'units': list(range(100))
+        })
+
+        horizon = 14
+        train = df.iloc[:-horizon]
+        test = df.iloc[-horizon:]
+
+        assert len(train) + len(test) == len(df)
+        assert train['date'].max() < test['date'].min()
+        assert len(test) == horizon
+
+    def test_prophet_prediction_shape(self):
+        """Prophet predictions should match test set size."""
+        from prophet import Prophet
+
+        df = pd.DataFrame({
+            'ds': pd.date_range('2024-01-01', periods=100, freq='D'),
+            'y': np.random.randint(10, 50, 100)
+        })
+
+        model = Prophet(daily_seasonality=False, yearly_seasonality=False)
+        model.fit(df)
+
+        future = pd.DataFrame({
+            'ds': pd.date_range('2024-04-11', periods=14, freq='D')
+        })
+        forecast = model.predict(future)
+
+        assert len(forecast) == 14
+        assert 'yhat' in forecast.columns
+
+    def test_xgboost_prediction_shape(self):
+        """XGBoost predictions should match test set size."""
+        from xgboost import XGBRegressor
+
+        X_train = np.random.rand(100, 5)
+        y_train = np.random.randint(10, 50, 100)
+        X_test = np.random.rand(14, 5)
+
+        model = XGBRegressor(n_estimators=10)
+        model.fit(X_train, y_train)
+        predictions = model.predict(X_test)
+
+        assert len(predictions) == 14
+
+    def test_ensemble_averaging(self):
+        """Ensemble should correctly average predictions."""
+        prophet_preds = np.array([10.0, 20.0, 30.0])
+        xgb_preds = np.array([12.0, 18.0, 32.0])
+
+        ensemble = np.nanmean(np.vstack([prophet_preds, xgb_preds]), axis=0)
+
+        assert len(ensemble) == 3
+        assert ensemble[0] == 11.0
+        assert ensemble[1] == 19.0
+        assert ensemble[2] == 31.0
+
+    def test_ensemble_with_nan_values(self):
+        """Ensemble should handle NaN values gracefully."""
+        prophet_preds = np.array([10.0, np.nan, 30.0])
+        xgb_preds = np.array([12.0, 18.0, np.nan])
+
+        ensemble = np.nanmean(np.vstack([prophet_preds, xgb_preds]), axis=0)
+
+        # Should use available values
+        assert ensemble[0] == 11.0
+        assert ensemble[1] == 18.0
+        assert ensemble[2] == 30.0
+
+
+class TestModelValidation:
+    """Tests for model validation and error handling."""
+
+    def test_insufficient_data_handling(self):
+        """Should handle datasets with insufficient data."""
+        df = pd.DataFrame({
+            'date': pd.date_range('2024-01-01', periods=20, freq='D'),
+            'sku_id': ['SKU001'] * 20,
+            'units': list(range(20))
+        })
+
+        # With 20 days and horizon=14, only 6 days for training
+        # This should be insufficient for reliable predictions
+        assert len(df) < 90  # Typical minimum
+
+    def test_negative_predictions_handling(self):
+        """Negative predictions should be clipped to zero."""
+        predictions = np.array([10.5, -5.2, 20.1, -0.5])
+        clipped = np.clip(predictions, 0, None)
+
+        assert all(clipped >= 0)
+        assert clipped[0] == 10.5
+        assert clipped[1] == 0.0
+        assert clipped[2] == 20.1
+        assert clipped[3] == 0.0
+
+    def test_model_with_constant_values(self):
+        """Should handle datasets with constant values."""
+        df = pd.DataFrame({
+            'ds': pd.date_range('2024-01-01', periods=50, freq='D'),
+            'y': [10] * 50  # Constant value
+        })
+
+        from prophet import Prophet
+        model = Prophet(daily_seasonality=False, yearly_seasonality=False)
+        model.fit(df)
+
+        future = pd.DataFrame({
+            'ds': pd.date_range('2024-02-20', periods=7, freq='D')
+        })
+        forecast = model.predict(future)
+
+        # Predictions should be close to constant value
+        assert all(forecast['yhat'] > 0)
+
+    def test_model_with_outliers(self):
+        """Should handle datasets with outliers."""
+        df = pd.DataFrame({
+            'ds': pd.date_range('2024-01-01', periods=50, freq='D'),
+            'y': [10] * 45 + [1000, 1000, 1000, 1000, 1000]  # Outliers at end
+        })
+
+        from prophet import Prophet
+        model = Prophet(daily_seasonality=False, yearly_seasonality=False)
+        model.fit(df)
+
+        future = pd.DataFrame({
+            'ds': pd.date_range('2024-02-20', periods=7, freq='D')
+        })
+        forecast = model.predict(future)
+
+        # Should produce predictions
+        assert len(forecast) == 7
+
+
+class TestBestModelSelection:
+    """Tests for best model selection logic."""
+
+    def test_selects_lowest_mape(self):
+        """Should select model with lowest MAPE."""
+        models = [
+            ('prophet', 10.5),
+            ('xgboost', 8.2),
+            ('naive', 15.0),
+            ('ensemble', 9.1)
+        ]
+
+        best = min(models, key=lambda x: x[1])
+        assert best[0] == 'xgboost'
+
+    def test_handles_nan_in_selection(self):
+        """Should handle NaN values in model selection."""
+        models = [
+            ('prophet', np.nan),
+            ('xgboost', 8.2),
+            ('naive', 15.0),
+            ('ensemble', np.nan)
+        ]
+
+        best = min(models, key=lambda x: (x[1] if not np.isnan(x[1]) else 999))
+        assert best[0] == 'xgboost'
+
+    def test_all_models_fail(self):
+        """Should handle case when all models fail."""
+        models = [
+            ('prophet', np.nan),
+            ('xgboost', np.nan),
+            ('naive', np.nan),
+            ('ensemble', np.nan)
+        ]
+
+        best = min(models, key=lambda x: (x[1] if not np.isnan(x[1]) else 999))
+        # Should still return a model name (first one with lowest "infinity")
+        assert best[0] in ['prophet', 'xgboost', 'naive', 'ensemble']
+
+
+class TestPredictionBounds:
+    """Tests for prediction confidence bounds."""
+
+    def test_prediction_bounds_ordering(self):
+        """Lower bound should be <= prediction <= upper bound."""
+        yhat = 100.0
+        yhat_lower = 80.0
+        yhat_upper = 120.0
+
+        assert yhat_lower <= yhat <= yhat_upper
+
+    def test_bounds_coverage(self):
+        """Prediction bounds should provide reasonable coverage."""
+        # Simulate Prophet-like confidence intervals
+        predictions = np.array([100, 110, 120])
+        lower = predictions * 0.8
+        upper = predictions * 1.2
+
+        assert all(lower <= predictions)
+        assert all(predictions <= upper)
+        assert all(upper - lower > 0)

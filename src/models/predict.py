@@ -9,11 +9,13 @@ import argparse
 import pandas as pd
 import numpy as np
 from pathlib import Path
+from typing import Dict, Optional, Tuple
 import joblib
 from prophet import Prophet
 
 from src.utils.logger import logger
 from src.utils.config import PATHS
+from src.utils.types import PathLike, ProphetModelDict
 from src.etl.load_data import load_sales
 from src.etl.clean_data import clean_sales
 from src.etl.feature_builder import build_features
@@ -39,7 +41,7 @@ def normalize_sku(s) -> str:
     return s
 
 
-def load_prophet_models() -> dict:
+def load_prophet_models() -> Dict[str, Prophet]:
     """
     Загружает предобученные модели Prophet.
 
@@ -57,7 +59,7 @@ def load_prophet_models() -> dict:
     return {}
 
 
-def predict(horizon: int = 14):
+def predict(horizon: int = 14) -> Tuple[pd.DataFrame, pd.DataFrame]:
     logger.info(f"Start predicting, horizon={horizon}")
 
     # 1. загрузили и подготовили данные

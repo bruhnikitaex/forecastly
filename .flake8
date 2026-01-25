@@ -1,0 +1,36 @@
+[flake8]
+# Максимальная длина строки (согласована с black)
+max-line-length = 100
+
+# Игнорируемые коды ошибок
+# E203: whitespace before ':' (конфликт с black)
+# W503: line break before binary operator (устаревшее правило)
+# E501: line too long (обрабатывается black)
+ignore = E203, W503, E501
+
+# Директории для исключения
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    env,
+    build,
+    dist,
+    *.egg-info,
+    .pytest_cache,
+    .mypy_cache,
+    .tox,
+    data,
+    logs,
+    htmlcov
+
+# Максимальная сложность функций (cyclomatic complexity)
+max-complexity = 10
+
+# Проверять docstrings
+docstring-convention = google
+
+# Количество пустых строк
+# Между top-level функциями/классами: 2
+# Между методами класса: 1

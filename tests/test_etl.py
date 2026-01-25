@@ -366,3 +366,265 @@ class TestValidateCsvFile:
 
         with pytest.raises(ValidationError, match="пуст"):
             validate_csv_file(csv_path)
+
+
+class TestValidationEdgeCases:
+    """Additional edge case tests for validation functions."""
+
+    def test_validate_with_extra_columns(self):
+        """Should pass with extra columns not in required list."""
+        df = pd.DataFrame({
+            'date': ['2024-01-01'],
+            'sku_id': ['A'],
+            'units': [10],
+            'extra_col': ['extra']
+        })
+        # Should not raise error
+        validate_required_columns(df, ['date', 'sku_id', 'units'])
+
+    def test_validate_date_with_different_formats(self):
+        """Should handle different date formats."""
+        df1 = pd.DataFrame({'date': ['2024-01-01', '2024-01-02']})
+        df2 = pd.DataFrame({'date': ['01/01/2024', '01/02/2024']})
+        df3 = pd.DataFrame({'date': ['2024/01/01', '2024/01/02']})
+
+        result1 = validate_date_column(df1, 'date')
+        result2 = validate_date_column(df2, 'date')
+        result3 = validate_date_column(df3, 'date')
+
+        assert pd.api.types.is_datetime64_any_dtype(result1['date'])
+        assert pd.api.types.is_datetime64_any_dtype(result2['date'])
+        assert pd.api.types.is_datetime64_any_dtype(result3['date'])
+
+    def test_validate_numeric_with_float_strings(self):
+        """Should handle numeric strings."""
+        df = pd.DataFrame({'units': ['10.5', '20.3', '30.1']})
+        result = validate_numeric_column(df, 'units')
+        assert result['units'].dtype in [np.float64]
+
+    def test_validate_date_range_edge_dates(self):
+        """Should handle edge cases in date ranges."""
+        # Exactly min_days
+        dates = pd.date_range('2024-01-01', periods=30, freq='D')
+        df = pd.DataFrame({'date': dates})
+        validate_date_range(df, 'date', min_days=30)
+
+        # One day less should fail
+        dates = pd.date_range('2024-01-01', periods=29, freq='D')
+        df = pd.DataFrame({'date': dates})
+        with pytest.raises(ValidationError):
+            validate_date_range(df, 'date', min_days=30)
+
+
+class TestCleaningEdgeCases:
+    """Edge case tests for cleaning functions."""
+
+    def test_remove_outliers_all_same_values(self):
+        """Should handle data with all same values."""
+        df = pd.DataFrame({
+            'sku_id': ['A'] * 10,
+            'store_id': ['S1'] * 10,
+            'units': [10] * 10
+        })
+        result = remove_outliers_iqr(df, 'units', ['sku_id', 'store_id'])
+        assert list(result['units']) == [10] * 10
+
+    def test_remove_outliers_small_group(self):
+        """Should handle small groups gracefully."""
+        df = pd.DataFrame({
+            'sku_id': ['A', 'A', 'A'],
+            'store_id': ['S1', 'S1', 'S1'],
+            'units': [10, 11, 100]
+        })
+        result = remove_outliers_iqr(df, 'units', ['sku_id', 'store_id'])
+        # With only 3 values, IQR method should still work
+        assert len(result) == 3
+
+    def test_fill_date_gaps_no_gaps(self):
+        """Should handle data with no gaps."""
+        df = pd.DataFrame({
+            'date': pd.date_range('2024-01-01', periods=7, freq='D'),
+            'sku_id': ['A'] * 7,
+            'store_id': ['S1'] * 7,
+            'units': list(range(7))
+        })
+        result = fill_date_gaps(df)
+        assert len(result) == 7
+
+    def test_fill_date_gaps_multiple_skus(self):
+        """Should fill gaps for each SKU separately."""
+        df = pd.DataFrame({
+            'date': pd.to_datetime(['2024-01-01', '2024-01-03', '2024-01-01', '2024-01-03']),
+            'sku_id': ['A', 'A', 'B', 'B'],
+            'store_id': ['S1', 'S1', 'S1', 'S1'],
+            'units': [10, 12, 20, 22]
+        })
+        result = fill_date_gaps(df)
+        # Should have filled dates for both SKUs
+        assert len(result) > 4
+
+
+class TestFeatureBuilderEdgeCases:
+    """Edge case tests for feature building."""
+
+    def test_build_features_short_series(self):
+        """Should handle short time series."""
+        df = pd.DataFrame({
+            'date': pd.date_range('2024-01-01', periods=10, freq='D'),
+            'sku_id': ['A'] * 10,
+            'store_id': ['S1'] * 10,
+            'units': list(range(10))
+        })
+        result = build_features(df)
+
+        # Lag features will have NaN for first values
+        assert result['units_lag_1'].isna().sum() > 0
+        assert result['units_lag_7'].isna().sum() > 0
+
+    def test_build_features_leap_year(self):
+        """Should handle leap year dates."""
+        df = pd.DataFrame({
+            'date': pd.date_range('2024-02-28', periods=3, freq='D'),
+            'sku_id': ['A'] * 3,
+            'store_id': ['S1'] * 3,
+            'units': [10, 11, 12]
+        })
+        result = build_features(df)
+
+        # 2024 is leap year, so Feb 29 should exist
+        assert len(result) == 3
+        assert pd.Timestamp('2024-02-29') in result['date'].values
+
+    def test_build_features_year_boundary(self):
+        """Should handle year boundary transitions."""
+        df = pd.DataFrame({
+            'date': pd.date_range('2023-12-30', periods=5, freq='D'),
+            'sku_id': ['A'] * 5,
+            'store_id': ['S1'] * 5,
+            'units': list(range(5))
+        })
+        result = build_features(df)
+
+        # Should handle transition from 2023 to 2024
+        assert 'week' in result.columns
+        assert 'month' in result.columns
+
+
+class TestDataPipelineIntegration:
+    """Integration tests for complete data pipeline."""
+
+    def test_full_pipeline_with_real_like_data(self):
+        """Should process realistic sales data through full pipeline."""
+        # Create realistic sales data
+        dates = []
+        sku_ids = []
+        units = []
+
+        for sku in ['SKU001', 'SKU002', 'SKU003']:
+            for i in range(90):
+                dates.append(pd.Timestamp('2024-01-01') + pd.Timedelta(days=i))
+                sku_ids.append(sku)
+                # Realistic sales pattern with weekly seasonality
+                base = 50
+                weekly = 10 * np.sin(i * 2 * np.pi / 7)
+                noise = np.random.randn() * 5
+                units.append(max(0, base + weekly + noise))
+
+        df = pd.DataFrame({
+            'date': dates,
+            'sku_id': sku_ids,
+            'units': units
+        })
+
+        # Run through pipeline
+        cleaned = clean_sales(df)
+        features = build_features(cleaned)
+
+        # Validate output
+        assert len(features) > 0
+        assert 'date' in features.columns
+        assert 'sku_id' in features.columns
+        assert 'units' in features.columns
+        assert 'dow' in features.columns
+        assert pd.api.types.is_datetime64_any_dtype(features['date'])
+
+    def test_pipeline_preserves_sku_counts(self):
+        """Pipeline should preserve SKU counts."""
+        df = pd.DataFrame({
+            'date': pd.date_range('2024-01-01', periods=30, freq='D').tolist() * 3,
+            'sku_id': ['A'] * 30 + ['B'] * 30 + ['C'] * 30,
+            'units': list(range(90))
+        })
+
+        original_skus = df['sku_id'].nunique()
+
+        cleaned = clean_sales(df)
+        features = build_features(cleaned)
+
+        assert features['sku_id'].nunique() == original_skus
+
+    def test_pipeline_handles_missing_values(self):
+        """Pipeline should handle missing values appropriately."""
+        df = pd.DataFrame({
+            'date': pd.date_range('2024-01-01', periods=30, freq='D'),
+            'sku_id': ['A'] * 30,
+            'units': [10] * 20 + [np.nan] * 10
+        })
+
+        cleaned = clean_sales(df)
+
+        # Missing values should be filled with 0
+        assert cleaned['units'].isna().sum() == 0
+
+
+class TestValidationWithMultipleSKUs:
+    """Tests for validation with multiple SKUs."""
+
+    def test_validate_multiple_skus_sufficient(self):
+        """Should pass with sufficient SKUs."""
+        df = pd.DataFrame({
+            'sku_id': ['A', 'B', 'C', 'D', 'E']
+        })
+        validate_sku_count(df, 'sku_id', min_skus=3)
+
+    def test_validate_data_completeness_per_sku(self):
+        """Data completeness check across multiple SKUs."""
+        df = pd.DataFrame({
+            'date': pd.date_range('2024-01-01', periods=30, freq='D').tolist() * 2,
+            'sku_id': ['A'] * 30 + ['B'] * 30,
+            'units': [10] * 30 + [np.nan] * 30
+        })
+
+        # Overall 50% missing
+        with pytest.raises(ValidationError):
+            validate_data_completeness(df, ['units'], max_missing_percent=40.0)
+
+
+class TestOutlierDetection:
+    """Comprehensive outlier detection tests."""
+
+    def test_outlier_detection_symmetric(self):
+        """Should detect outliers on both ends."""
+        df = pd.DataFrame({
+            'sku_id': ['A'] * 12,
+            'store_id': ['S1'] * 12,
+            'units': [10, 10, 10, 10, 10, 1, 10, 10, 10, 10, 10, 100]
+        })
+        result = remove_outliers_iqr(df, 'units', ['sku_id', 'store_id'])
+
+        # Both 1 and 100 should be clipped
+        assert result['units'].min() > 1
+        assert result['units'].max() < 100
+
+    def test_outlier_preserves_median_range(self):
+        """Should preserve values in median range."""
+        df = pd.DataFrame({
+            'sku_id': ['A'] * 20,
+            'store_id': ['S1'] * 20,
+            'units': list(range(10, 30))
+        })
+        result = remove_outliers_iqr(df, 'units', ['sku_id', 'store_id'])
+
+        # Median values should be unchanged
+        median_idx = len(df) // 2
+        assert result['units'].iloc[median_idx] == df['units'].iloc[median_idx]

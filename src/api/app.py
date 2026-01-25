@@ -31,6 +31,15 @@ from slowapi.errors import RateLimitExceeded
 
 from src.utils.config import PATHS
 from src.utils.logger import logger
+from src.api.exceptions import (
+    register_exception_handlers,
+    SKUNotFoundException,
+    PredictionNotFoundException,
+    ForecastGenerationException,
+    DatabaseException,
+)
+from src.monitoring import get_metrics_collector
+from src.api.middleware import MetricsMiddleware, RequestLoggingMiddleware
 
 # Инициализация rate limiter
 # Лимиты настраиваются через RATE_LIMIT env variable (формат: "100/minute")
@@ -85,6 +94,13 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan
 )
+
+# Регистрация exception handlers
+register_exception_handlers(app)
+
+# Middleware (порядок важен - выполняются в обратном порядке)
+app.add_middleware(MetricsMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
 
 # Подключаем rate limiter
 app.state.limiter = limiter
@@ -353,21 +369,15 @@ def get_predict_v1(
 
         if not pred_path.exists():
             logger.error(f'Файл predictions.csv не найден по пути {pred_path}')
-            raise HTTPException(
-                status_code=404,
-                detail="Прогнозы не найдены. Запустите процесс прогнозирования."
-            )
+            raise PredictionNotFoundException("Прогнозы не найдены. Запустите процесс прогнозирования.")
 
         df = pd.read_csv(pred_path, parse_dates=["date"])
         df_sku = df[df["sku_id"].astype(str).str.upper() == sku_id_norm].copy()
 
         if df_sku.empty:
             logger.warning(f"SKU '{sku_id_norm}' не найден в прогнозах")
-            available_skus = df["sku_id"].unique()[:5].tolist()
-            raise HTTPException(
-                status_code=404,
-                detail=f"Прогноз для SKU '{sku_id_norm}' не найден. Доступные SKU: {available_skus}..."
-            )
+            available_skus = df["sku_id"].unique().tolist()
+            raise SKUNotFoundException(sku_id_norm, available_skus)
 
         df_sku = df_sku.sort_values("date").head(horizon)
 
@@ -402,9 +412,9 @@ def rebuild_predict_v1(
 
         if result.returncode != 0:
             logger.error(f'Ошибка при пересчёте прогнозов: {result.stderr}')
-            raise HTTPException(
-                status_code=500,
-                detail=f"Ошибка при пересчёте прогнозов: {result.stderr[:500]}"
+            raise ForecastGenerationException(
+                message="Ошибка при пересчёте прогнозов",
+                stderr=result.stderr
             )
 
         response = {
@@ -606,3 +616,58 @@ def sync_csv_to_db(db: Session = Depends(get_optional_db)):
     except Exception as e:
         logger.error(f"Ошибка синхронизации: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==============================================================================
+# MONITORING ENDPOINTS
+# ==============================================================================
+
+@app.get("/metrics", tags=["Monitoring"])
+def get_prometheus_metrics():
+    """
+    Get application metrics in Prometheus format.
+
+    Returns metrics for:
+    - API request latency
+    - Model prediction time
+    - System resources
+    """
+    collector = get_metrics_collector()
+    return JSONResponse(
+        content=collector.get_metrics_text(),
+        media_type="text/plain"
+    )
+
+
+@app.get("/api/v1/monitoring/metrics", tags=["Monitoring"])
+def get_metrics_json():
+    """Get application metrics in JSON format."""
+    collector = get_metrics_collector()
+    return collector.get_metrics_json()
+
+
+@app.get("/api/v1/monitoring/health-detailed", tags=["Monitoring"])
+def get_detailed_health():
+    """
+    Get detailed health information including metrics.
+    """
+    collector = get_metrics_collector()
+    collector.collect_system_metrics()
+
+    return {
+        "status": "ok",
+        "timestamp": datetime.now().isoformat(),
+        "system": collector.system_metrics,
+        "database_mode": USE_DATABASE,
+        "components": {
+            "api": "healthy",
+            "models": {
+                "prophet": (Path(PATHS['data']['models_dir']) / 'prophet_model.pkl').exists(),
+                "xgboost": (Path(PATHS['data']['models_dir']) / 'xgboost_model.pkl').exists(),
+            },
+            "data": {
+                "raw": (DATA_RAW / "sales_synth.csv").exists(),
+                "processed": (_normalize_processed_path(DATA_PROC) / "processed.parquet").exists(),
+            }
+        }
+    }

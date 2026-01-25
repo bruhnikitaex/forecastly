@@ -29,7 +29,7 @@ RUN mkdir -p data/raw data/processed data/models logs
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/health')" || exit 1
+    CMD python healthcheck.py || exit 1
 
 # Exposing API порт
 EXPOSE 8000
