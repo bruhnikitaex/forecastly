@@ -9,7 +9,7 @@ import argparse
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 import joblib
 from prophet import Prophet
 
@@ -59,7 +59,7 @@ def load_prophet_models() -> Dict[str, Prophet]:
     return {}
 
 
-def predict(horizon: int = 14) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def predict(horizon: int = 14) -> Path:
     logger.info(f"Start predicting, horizon={horizon}")
 
     # 1. загрузили и подготовили данные
@@ -158,10 +158,10 @@ def predict(horizon: int = 14) -> Tuple[pd.DataFrame, pd.DataFrame]:
     hist_path = hist_dir / f"predictions_{ts}.csv"
     all_pred.to_csv(hist_path, index=False)
 
-    logger.info(f"✅ Predictions saved to {out_path}")
-    logger.info(f"🗂  History saved to {hist_path}")
-    print(f"✅ Predictions saved to {out_path}")
-    print(f"🗂  History saved to {hist_path}")
+    logger.info(f"Predictions saved to {out_path}")
+    logger.info(f"History saved to {hist_path}")
+    print(f"[OK] Predictions saved to {out_path}")
+    print(f"[OK] History saved to {hist_path}")
     return out_path
 
 

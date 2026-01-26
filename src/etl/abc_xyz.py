@@ -1,7 +1,31 @@
+"""
+Модуль ABC-XYZ анализа для классификации SKU.
+
+ABC-анализ группирует товары по вкладу в оборот:
+- A: 80% оборота (наиболее важные)
+- B: 15% оборота (средней важности)
+- C: 5% оборота (наименее важные)
+
+XYZ-анализ группирует по стабильности спроса (коэффициент вариации):
+- X: CV < 0.1 (стабильный спрос)
+- Y: 0.1 <= CV < 0.25 (умеренные колебания)
+- Z: CV >= 0.25 (нестабильный спрос)
+"""
+
 import pandas as pd
 import numpy as np
 
-def abc_xyz(df: pd.DataFrame):
+
+def abc_xyz(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Выполняет ABC-XYZ анализ по SKU.
+
+    Args:
+        df: DataFrame с колонками sku_id и units.
+
+    Returns:
+        DataFrame с колонками: sku_id, units_sum, ABC, cv, XYZ, ABCXYZ.
+    """
     sums = df.groupby('sku_id', as_index=False)['units'].sum().rename(columns={'units':'units_sum'})
     totals = sums['units_sum'].sum()
     sums = sums.sort_values('units_sum', ascending=False)

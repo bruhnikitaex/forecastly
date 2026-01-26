@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Forecastly API",
     description="API для системы анализа и прогнозирования продаж",
-    version="1.1.0",
+    version="1.3.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan
@@ -193,7 +193,7 @@ def health():
     status = {
         "status": "ok",
         "service": "forecastly-api",
-        "version": "1.1.0",
+        "version": "1.3.0",
         "timestamp": datetime.now().isoformat(),
         "database_mode": USE_DATABASE
     }
@@ -209,7 +209,7 @@ def root():
     """Корневой endpoint с информацией об API."""
     return {
         "service": "forecastly-api",
-        "version": "1.1.0",
+        "version": "1.3.0",
         "database_mode": USE_DATABASE,
         "docs": "/docs",
         "redoc": "/redoc",

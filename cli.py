@@ -138,13 +138,13 @@ def reset():
 
     from sqlalchemy import create_engine
     from src.db.models import Base
-    from src.db.database import get_db_url
+    from src.db.database import get_database_url
     from src.db.init_db import init_database
 
     click.echo("🗑️  Dropping all tables...")
 
     try:
-        engine = create_engine(get_db_url())
+        engine = create_engine(get_database_url())
         Base.metadata.drop_all(bind=engine)
         click.secho("✅ Tables dropped", fg='yellow')
 
@@ -319,7 +319,7 @@ def train(type):
     if type == 'all' or type == 'prophet':
         click.echo("🔮 Training Prophet models...")
         try:
-            from src.models.train_prophet import main as train_prophet
+            from src.models.train_prophet import train as train_prophet
             train_prophet()
             click.secho("✅ Prophet training complete!", fg='green')
         except Exception as e:
@@ -328,7 +328,7 @@ def train(type):
     if type == 'all' or type == 'xgboost':
         click.echo("🌲 Training XGBoost models...")
         try:
-            from src.models.train_xgboost import main as train_xgboost
+            from src.models.train_xgboost import train as train_xgboost
             train_xgboost()
             click.secho("✅ XGBoost training complete!", fg='green')
         except Exception as e:
@@ -355,7 +355,7 @@ def evaluate(horizon):
 @model.command()
 def predict():
     """Generate predictions for all SKUs."""
-    from src.models.predict import main as run_predict
+    from src.models.predict import predict as run_predict
 
     click.echo("🔮 Generating predictions...")
 

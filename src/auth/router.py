@@ -415,7 +415,7 @@ def refresh_token(
     token_hash = hash_api_key(refresh_data.refresh_token)
     db_token = db.query(RefreshToken).filter(
         RefreshToken.token_hash == token_hash,
-        RefreshToken.is_revoked == False
+        RefreshToken.is_revoked.is_(False)
     ).first()
 
     if not db_token:
@@ -827,7 +827,7 @@ def list_locked_accounts(
 
     # Находим пользователей с активной блокировкой
     locked_users = db.query(User).filter(
-        User.locked_until != None,
+        User.locked_until.isnot(None),
         User.locked_until > now
     ).all()
 

@@ -96,8 +96,8 @@ def evaluate(horizon: int = 14):
     out_path.parent.mkdir(parents=True, exist_ok=True)
     met.to_csv(out_path, index=False)
 
-    logger.info(f"✅ Evaluation complete. Results saved to {out_path}")
-    print(f"✅ Evaluation complete. Results saved to {out_path}")
+    logger.info(f"Evaluation complete. Results saved to {out_path}")
+    print(f"[OK] Evaluation complete. Results saved to {out_path}")
 
 
 if __name__ == "__main__":

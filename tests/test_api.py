@@ -99,7 +99,7 @@ class TestRootEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["service"] == "forecastly-api"
-        assert data["version"] == "1.1.0"
+        assert data["version"] == "1.3.0"
         assert "endpoints" in data
 
     def test_root_contains_docs_link(self):

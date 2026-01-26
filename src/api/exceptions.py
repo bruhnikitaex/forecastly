@@ -4,6 +4,7 @@ Custom exceptions and error handlers for Forecastly API.
 Provides centralized exception handling and structured error responses.
 """
 
+from datetime import datetime
 from typing import Any, Dict, Optional
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
@@ -171,7 +172,7 @@ async def forecastly_exception_handler(
                 "details": exc.details,
             },
             "path": str(request.url.path),
-            "timestamp": logger._get_timestamp(),
+            "timestamp": datetime.now().isoformat(),
         },
     )
 

@@ -32,12 +32,12 @@ def get_sku_by_id(db: Session, id: int) -> Optional[SKU]:
 
 def get_all_skus(db: Session, skip: int = 0, limit: int = 100) -> list[SKU]:
     """Получить список всех активных SKU."""
-    return db.query(SKU).filter(SKU.is_active == True).offset(skip).limit(limit).all()
+    return db.query(SKU).filter(SKU.is_active.is_(True)).offset(skip).limit(limit).all()
 
 
 def get_sku_count(db: Session) -> int:
     """Получить количество SKU."""
-    return db.query(func.count(SKU.id)).filter(SKU.is_active == True).scalar()
+    return db.query(func.count(SKU.id)).filter(SKU.is_active.is_(True)).scalar()
 
 
 def create_sku(db: Session, sku_id: str, name: str = None,

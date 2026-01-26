@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- (No unreleased changes)
+
+## [1.3.0] - 2026-01-26
+
+### Added
 - Comprehensive project documentation improvements
 - CI/CD pipeline with GitHub Actions
 - Pre-commit hooks for code quality
@@ -21,6 +26,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Enhanced code quality tooling setup
 - Improved development workflow
+- Updated all version references to 1.3.0
+- Updated year to 2026
+
+### Fixed
+- Fixed incorrect return type annotation in `predict.py`
+- Fixed SQLAlchemy anti-patterns (`== True/False` replaced with `.is_(True/False)`)
+- Fixed CLI imports for model training functions
+- Fixed missing `datetime` import in `exceptions.py`
+- Fixed `get_db_url` function reference in CLI (renamed to `get_database_url`)
+- Added missing docstrings in `feature_builder.py`
+- Fixed timestamp generation in exception handlers
 
 ## [1.1.0] - 2025-01-25
 
@@ -145,7 +161,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History Summary
 
-- **v1.1.0** (Current) - Database, Auth, Security
+- **v1.3.0** (Current) - Bug fixes, code quality improvements
+- **v1.1.0** - Database, Auth, Security
 - **v1.0.0** - Core forecasting, API, Dashboard
 - **v0.6.1** - Model improvements
 - **v0.6.0** - Prophet integration
