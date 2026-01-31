@@ -4,7 +4,18 @@ model:
     n_estimators: 500
     learning_rate: 0.05
     max_depth: 6
+  lightgbm:
+    n_estimators: 500
+    learning_rate: 0.05
+    max_depth: 6
+    num_leaves: 31
   prophet:
     seasonality_mode: additive
     weekly_seasonality: true
     yearly_seasonality: true
+    interval_width: 0.80
+  ensemble:
+    method: average
+  backtesting:
+    n_folds: 3
+    min_train_days: 90

@@ -49,11 +49,14 @@ limiter = Limiter(key_func=get_remote_address, default_limits=[_rate_limit])
 # Проверяем, включена ли база данных
 USE_DATABASE = os.getenv('USE_DATABASE', 'false').lower() == 'true'
 
+from src.api.data_router import router as data_router
+
 if USE_DATABASE:
     from src.db.database import get_db, init_db, check_connection, DATABASE_URL
     from src.db import crud
     # Импортируем auth router только если БД включена
     from src.auth.router import router as auth_router, auth_limiter
+    from src.api.admin_router import router as admin_router
 
 # конфиг
 try:
@@ -89,7 +92,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Forecastly API",
     description="API для системы анализа и прогнозирования продаж",
-    version="1.3.0",
+    version="1.4.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan
@@ -107,8 +110,11 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Подключаем auth router (только если БД включена)
+app.include_router(data_router, prefix="/api/v1")
+
 if USE_DATABASE:
     app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(admin_router, prefix="/api/v1")
     # Добавляем auth limiter state
     app.state.auth_limiter = auth_limiter
 
@@ -193,7 +199,7 @@ def health():
     status = {
         "status": "ok",
         "service": "forecastly-api",
-        "version": "1.3.0",
+        "version": "1.4.0",
         "timestamp": datetime.now().isoformat(),
         "database_mode": USE_DATABASE
     }
@@ -209,7 +215,7 @@ def root():
     """Корневой endpoint с информацией об API."""
     return {
         "service": "forecastly-api",
-        "version": "1.3.0",
+        "version": "1.4.0",
         "database_mode": USE_DATABASE,
         "docs": "/docs",
         "redoc": "/redoc",
@@ -220,6 +226,10 @@ def root():
             "rebuild": "/api/v1/predict/rebuild?horizon=14",
             "metrics": "/api/v1/metrics",
             "status": "/api/v1/status",
+            "data_upload": "/api/v1/data/upload",
+            "data_datasets": "/api/v1/data/datasets",
+            "data_import_postgres": "/api/v1/data/import/postgres",
+            "forecast_batch": "/api/v1/forecast/batch",
             "db_stats": "/api/v1/db/stats" if USE_DATABASE else None,
             "forecast_runs": "/api/v1/forecast-runs" if USE_DATABASE else None
         },
@@ -244,7 +254,8 @@ def system_status(db: Session = Depends(get_optional_db)):
                 "metrics": (DATA_PROC_ / "metrics.csv").exists(),
                 "models": {
                     "prophet": (Path(PATHS['data']['models_dir']) / 'prophet_model.pkl').exists(),
-                    "xgboost": (Path(PATHS['data']['models_dir']) / 'xgboost_model.pkl').exists()
+                    "xgboost": (Path(PATHS['data']['models_dir']) / 'xgboost_model.pkl').exists(),
+                    "lightgbm": (Path(PATHS['data']['models_dir']) / 'lightgbm_model.pkl').exists()
                 }
             }
         }
@@ -269,8 +280,12 @@ def system_status(db: Session = Depends(get_optional_db)):
 # ============================================================================
 
 @app.get("/api/v1/skus", tags=["SKU"])
-def get_skus_v1(db: Session = Depends(get_optional_db)):
-    """Возвращает список уникальных SKU."""
+def get_skus_v1(
+    skip: int = Query(0, ge=0, description="Пропустить первые N записей"),
+    limit: int = Query(100, ge=1, le=500, description="Количество записей (макс. 500)"),
+    db: Session = Depends(get_optional_db)
+):
+    """Возвращает список уникальных SKU с пагинацией."""
     try:
         skus = set()
 
@@ -313,8 +328,11 @@ def get_skus_v1(db: Session = Depends(get_optional_db)):
                 detail="Нет доступных SKU. Запустите ETL процесс."
             )
 
-        logger.info(f"✓ Запрос SKU выполнен, найдено {len(skus)} SKU")
-        return {"skus": sorted(list(skus)), "count": len(skus)}
+        all_skus = sorted(list(skus))
+        total = len(all_skus)
+        page = all_skus[skip:skip + limit]
+        logger.info(f"✓ Запрос SKU выполнен, найдено {total} SKU")
+        return {"skus": page, "total": total, "skip": skip, "limit": limit, "count": len(page)}
 
     except HTTPException:
         raise
@@ -330,7 +348,7 @@ def get_skus_v1(db: Session = Depends(get_optional_db)):
 @app.get("/api/v1/predict", tags=["Predictions"])
 def get_predict_v1(
     sku_id: str = Query(..., description="SKU товара (например SKU001)"),
-    horizon: int = Query(14, ge=1, le=120, description="Горизонт прогноза в днях"),
+    horizon: int = Query(14, ge=1, le=30, description="Горизонт прогноза в днях (1-30)"),
     db: Session = Depends(get_optional_db)
 ):
     """Возвращает прогноз по конкретному SKU."""
@@ -348,6 +366,7 @@ def get_predict_v1(
                             "date": p.date.isoformat(),
                             "prophet": p.prophet,
                             "xgb": p.xgb,
+                            "lgbm": p.lgbm,
                             "ensemble": p.ensemble,
                             "p_low": p.p_low,
                             "p_high": p.p_high
@@ -399,7 +418,7 @@ def get_predict_v1(
 
 @app.post("/api/v1/predict/rebuild", tags=["Predictions"])
 def rebuild_predict_v1(
-    horizon: int = Query(14, ge=1, le=120),
+    horizon: int = Query(14, ge=1, le=30),
     save_to_db: bool = Query(False, description="Сохранить результаты в БД"),
     db: Session = Depends(get_optional_db)
 ):
@@ -664,6 +683,7 @@ def get_detailed_health():
             "models": {
                 "prophet": (Path(PATHS['data']['models_dir']) / 'prophet_model.pkl').exists(),
                 "xgboost": (Path(PATHS['data']['models_dir']) / 'xgboost_model.pkl').exists(),
+                "lightgbm": (Path(PATHS['data']['models_dir']) / 'lightgbm_model.pkl').exists(),
             },
             "data": {
                 "raw": (DATA_RAW / "sales_synth.csv").exists(),

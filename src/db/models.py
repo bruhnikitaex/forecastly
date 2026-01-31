@@ -119,6 +119,7 @@ class Prediction(Base):
     date = Column(Date, nullable=False, index=True)
     prophet = Column(Float, nullable=True)
     xgb = Column(Float, nullable=True)
+    lgbm = Column(Float, nullable=True)
     ensemble = Column(Float, nullable=True)
     p_low = Column(Float, nullable=True)
     p_high = Column(Float, nullable=True)
@@ -600,6 +601,60 @@ class BackgroundJob(Base):
 
     def __repr__(self):
         return f"<BackgroundJob(job_id='{self.job_id}', type='{self.job_type}', status='{self.status}')>"
+
+
+class Dataset(Base):
+    """
+    Метаданные загруженных датасетов.
+
+    Хранит информацию о каждой загрузке данных (CSV/XLSX/PostgreSQL).
+    """
+    __tablename__ = 'datasets'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False)
+    source_type = Column(String(50), nullable=False)  # csv, xlsx, postgres
+    file_path = Column(String(500), nullable=True)
+    row_count = Column(Integer, default=0)
+    column_count = Column(Integer, default=0)
+    columns = Column(Text, nullable=True)  # JSON array of column names
+    size_bytes = Column(Integer, default=0)
+    uploaded_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    status = Column(String(20), default='uploaded')  # uploaded, validated, processed, failed
+    validation_errors = Column(Text, nullable=True)  # JSON
+    created_at = Column(DateTime, default=utcnow)
+
+    def __repr__(self):
+        return f"<Dataset(name='{self.name}', source='{self.source_type}', rows={self.row_count})>"
+
+
+class ModelRegistry(Base):
+    """
+    Реестр обученных моделей.
+
+    Хранит метаданные и метрики для каждой обученной модели.
+    """
+    __tablename__ = 'models_registry'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    model_type = Column(String(50), nullable=False, index=True)  # prophet, xgboost, lightgbm, ensemble
+    version = Column(String(50), nullable=False)
+    file_path = Column(String(500), nullable=False)
+    file_size_bytes = Column(Integer, default=0)
+    trained_on_rows = Column(Integer, default=0)
+    training_duration_sec = Column(Float, nullable=True)
+    hyperparameters = Column(Text, default='{}')  # JSON
+    metrics = Column(Text, default='{}')  # JSON: {mae, rmse, mape, smape}
+    is_active = Column(Boolean, default=True)
+    trained_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index('ix_model_type_version', 'model_type', 'version'),
+    )
+
+    def __repr__(self):
+        return f"<ModelRegistry(type='{self.model_type}', version='{self.version}')>"
 
 
 class UsageRecord(Base):

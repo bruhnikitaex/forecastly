@@ -1,11 +1,29 @@
 """
 Модуль построения признаков для моделей прогнозирования.
 
-Включает календарные признаки, лаги и скользящие средние.
+Включает календарные признаки, лаги, скользящие средние и праздники.
 """
 
 import pandas as pd
+import numpy as np
 from src.utils.logger import logger
+
+
+# Российские праздники (фиксированные даты)
+RU_HOLIDAYS_FIXED = [
+    (1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8),  # Новогодние
+    (2, 23),  # День защитника Отечества
+    (3, 8),   # Международный женский день
+    (5, 1),   # Праздник Весны и Труда
+    (5, 9),   # День Победы
+    (6, 12),  # День России
+    (11, 4),  # День народного единства
+]
+
+
+def is_ru_holiday(date: pd.Timestamp) -> bool:
+    """Проверяет, является ли дата российским праздником."""
+    return (date.month, date.day) in RU_HOLIDAYS_FIXED
 
 
 def add_calendar_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -16,12 +34,17 @@ def add_calendar_features(df: pd.DataFrame) -> pd.DataFrame:
         df: DataFrame с колонкой date.
 
     Returns:
-        DataFrame с добавленными колонками: dow, week, month.
+        DataFrame с колонками: dow, week, month, is_weekend, is_holiday,
+        day_of_year, quarter.
     """
     logger.info('Adding calendar features...')
     df['dow'] = df['date'].dt.dayofweek
     df['week'] = df['date'].dt.isocalendar().week.astype(int)
     df['month'] = df['date'].dt.month
+    df['is_weekend'] = (df['dow'] >= 5).astype(int)
+    df['is_holiday'] = df['date'].apply(is_ru_holiday).astype(int)
+    df['day_of_year'] = df['date'].dt.dayofyear
+    df['quarter'] = df['date'].dt.quarter
     return df
 
 def add_lag_rolling(df: pd.DataFrame, lags=(1, 7, 14), windows=(7, 28)) -> pd.DataFrame:

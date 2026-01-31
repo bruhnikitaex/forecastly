@@ -2,3 +2,7 @@ data:
   raw: data/raw/sales_synth.csv
   processed: data/processed
   models_dir: data/models
+
+logging:
+  file: logs/forecastly.log
+  level: INFO

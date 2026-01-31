@@ -117,7 +117,6 @@ def predict(horizon: int = 14) -> Path:
             for i in range(horizon):
                 p = model.predict(cur)[0]
                 preds.append(float(p))
-                # обновим лаги
                 cur['units_lag_1'] = p
                 cur['units_lag_7'] = preds[i - 6] if i >= 6 else p
 
@@ -129,9 +128,41 @@ def predict(horizon: int = 14) -> Path:
             logger.warning(f"XGBoost failed on {sku_norm}: {e}")
             xgb_pred = pd.DataFrame(columns=['date', 'xgb'])
 
+        # -------- LightGBM --------
+        try:
+            lgbm_model_path = Path(PATHS['data']['models_dir']) / 'lightgbm_model.pkl'
+            lgbm_model = joblib.load(lgbm_model_path)
+
+            g_feat_lgbm = build_features(g.copy())
+            last_rows_lgbm = g_feat_lgbm.tail(60).copy()
+            lgbm_feature_cols = ['dow', 'week', 'month', 'units_lag_1', 'units_lag_7',
+                                 'units_lag_14', 'units_ma_7', 'units_ma_28']
+            lgbm_feature_cols = [c for c in lgbm_feature_cols if c in last_rows_lgbm.columns]
+            X_lgbm = last_rows_lgbm[lgbm_feature_cols].fillna(0)
+
+            lgbm_preds = []
+            cur_lgbm = X_lgbm.iloc[-1:].copy()
+            for i in range(horizon):
+                p = lgbm_model.predict(cur_lgbm)[0]
+                lgbm_preds.append(float(p))
+                if 'units_lag_1' in cur_lgbm.columns:
+                    cur_lgbm['units_lag_1'] = p
+                if 'units_lag_7' in cur_lgbm.columns:
+                    cur_lgbm['units_lag_7'] = lgbm_preds[i - 6] if i >= 6 else p
+
+            lgbm_pred = pd.DataFrame({
+                'date': [last_date + pd.Timedelta(days=i + 1) for i in range(horizon)],
+                'lgbm': lgbm_preds
+            })
+        except Exception as e:
+            logger.warning(f"LightGBM failed on {sku_norm}: {e}")
+            lgbm_pred = pd.DataFrame(columns=['date', 'lgbm'])
+
         # -------- Ensemble --------
         df_merge = pd.merge(prophet_pred, xgb_pred, on='date', how='outer')
-        df_merge['ensemble'] = df_merge[['prophet', 'xgb']].mean(axis=1)
+        df_merge = pd.merge(df_merge, lgbm_pred, on='date', how='outer')
+        model_cols_for_ens = [c for c in ['prophet', 'xgb', 'lgbm'] if c in df_merge.columns]
+        df_merge['ensemble'] = df_merge[model_cols_for_ens].mean(axis=1)
         df_merge['sku_id'] = sku_norm
         results.append(df_merge)
 

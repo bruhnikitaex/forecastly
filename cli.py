@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 
 @click.group()
-@click.version_option(version='1.3.0', prog_name='Forecastly CLI')
+@click.version_option(version='1.4.0', prog_name='Forecastly CLI')
 def cli():
     """
     Forecastly Admin CLI - Manage your forecasting system from the command line.
@@ -313,26 +313,51 @@ def model():
 
 
 @model.command()
-@click.option('--type', '-t', type=click.Choice(['prophet', 'xgboost', 'all']), default='all')
-def train(type):
-    """Train forecasting models."""
-    if type == 'all' or type == 'prophet':
-        click.echo("🔮 Training Prophet models...")
+@click.option('--model', '-m', 'model_type',
+              type=click.Choice(['prophet', 'xgboost', 'lgbm', 'all']), default='all')
+@click.option('--scope', '-s', type=click.Choice(['all', 'sku']), default='all',
+              help='Training scope: all SKUs together or per-SKU models')
+@click.option('--sku', 'sku_id', default=None, help='Specific SKU ID (when --scope=sku)')
+def train(model_type, scope, sku_id):
+    """Train forecasting models.
+
+    Examples:
+        forecastly model train --model prophet
+        forecastly model train --model lgbm
+        forecastly model train --scope sku --sku SKU001
+        forecastly model train  # trains all
+    """
+    if scope == 'sku' and sku_id:
+        click.echo(f"Training for SKU: {sku_id}")
+    elif scope == 'sku':
+        click.echo("Training per-SKU models...")
+
+    if model_type in ('all', 'prophet'):
+        click.echo("Training Prophet models...")
         try:
             from src.models.train_prophet import train as train_prophet
             train_prophet()
-            click.secho("✅ Prophet training complete!", fg='green')
+            click.secho("Prophet training complete!", fg='green')
         except Exception as e:
-            click.secho(f"❌ Prophet training failed: {e}", fg='red')
+            click.secho(f"Prophet training failed: {e}", fg='red')
 
-    if type == 'all' or type == 'xgboost':
-        click.echo("🌲 Training XGBoost models...")
+    if model_type in ('all', 'xgboost'):
+        click.echo("Training XGBoost models...")
         try:
             from src.models.train_xgboost import train as train_xgboost
             train_xgboost()
-            click.secho("✅ XGBoost training complete!", fg='green')
+            click.secho("XGBoost training complete!", fg='green')
         except Exception as e:
-            click.secho(f"❌ XGBoost training failed: {e}", fg='red')
+            click.secho(f"XGBoost training failed: {e}", fg='red')
+
+    if model_type in ('all', 'lgbm'):
+        click.echo("Training LightGBM models...")
+        try:
+            from src.models.train_lightgbm import train as train_lgbm
+            train_lgbm()
+            click.secho("LightGBM training complete!", fg='green')
+        except Exception as e:
+            click.secho(f"LightGBM training failed: {e}", fg='red')
 
 
 @model.command()
@@ -365,6 +390,55 @@ def predict():
         click.echo("📈 Results saved to data/processed/predictions.csv")
     except Exception as e:
         click.secho(f"❌ Prediction failed: {e}", fg='red')
+        sys.exit(1)
+
+
+# Forecast command (top-level for convenience)
+@cli.command()
+@click.option('--sku', required=True, help='SKU ID для прогноза')
+@click.option('--horizon', '-h', type=int, default=30, help='Горизонт прогноза (1-30 дней)')
+@click.option('--out', '-o', default='forecast.csv', help='Выходной CSV файл')
+def forecast(sku, horizon, out):
+    """Generate forecast for a specific SKU and export to CSV.
+
+    Examples:
+        forecastly forecast --sku SKU001 --horizon 30 --out forecast.csv
+        forecastly forecast --sku SKU005 -h 7 -o result.csv
+    """
+    import pandas as pd
+
+    click.echo(f"🔮 Прогноз для {sku} на {horizon} дней...")
+
+    try:
+        pred_path = Path('data/processed/predictions.csv')
+        if not pred_path.exists():
+            click.echo("Прогнозы не найдены, генерируем...")
+            from src.models.predict import predict as run_predict
+            run_predict(horizon=horizon)
+
+        df = pd.read_csv(pred_path, parse_dates=['date'])
+        sku_norm = sku.strip().upper().replace("SKU_", "SKU").replace("SKU-", "SKU")
+        df_sku = df[df['sku_id'].astype(str).str.upper() == sku_norm].copy()
+
+        if df_sku.empty:
+            available = df['sku_id'].unique().tolist()
+            click.secho(f"❌ SKU '{sku}' не найден. Доступные: {available[:10]}", fg='red')
+            sys.exit(1)
+
+        df_sku = df_sku.sort_values('date').head(horizon)
+        df_sku.to_csv(out, index=False)
+
+        click.secho(f"✅ Прогноз сохранён: {out} ({len(df_sku)} записей)", fg='green')
+
+        # Краткая сводка
+        for col in ['prophet', 'xgb', 'lgbm', 'ensemble']:
+            if col in df_sku.columns:
+                avg = df_sku[col].mean()
+                if not pd.isna(avg):
+                    click.echo(f"   {col:>10}: среднее = {avg:.1f}")
+
+    except Exception as e:
+        click.secho(f"❌ Ошибка: {e}", fg='red')
         sys.exit(1)
 
 
@@ -405,6 +479,148 @@ def list():
 def data():
     """Data management commands."""
     pass
+
+
+@data.command()
+@click.argument('file_path', type=click.Path(exists=True))
+def upload(file_path):
+    """Upload a CSV or XLSX data file.
+
+    Validates, normalizes and saves the file for further processing.
+
+    Examples:
+        forecastly data upload sales.csv
+        forecastly data upload report.xlsx
+    """
+    import pandas as pd
+    from pathlib import Path as P
+
+    ext = P(file_path).suffix.lower()
+    if ext not in ('.csv', '.xlsx'):
+        click.secho("Поддерживаемые форматы: CSV, XLSX", fg='red')
+        sys.exit(1)
+
+    click.echo(f"📥 Загрузка файла {file_path}...")
+
+    try:
+        if ext == '.xlsx':
+            df = pd.read_excel(file_path, engine='openpyxl')
+        else:
+            df = pd.read_csv(file_path)
+
+        # Нормализация колонок
+        df.columns = [c.strip().lower() for c in df.columns]
+        col_map = {"qty": "units", "quantity": "units", "sales": "units"}
+        df.rename(columns=col_map, inplace=True)
+
+        required = {"date", "sku_id"}
+        missing = required - set(df.columns)
+        if missing:
+            click.secho(f"Отсутствуют обязательные поля: {missing}", fg='red')
+            sys.exit(1)
+        if "units" not in df.columns:
+            click.secho("Не найдено поле количества (qty/units/quantity/sales)", fg='red')
+            sys.exit(1)
+
+        # Сохраняем как CSV
+        raw_dir = Path('data/raw')
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        from datetime import datetime as dt
+        ts = dt.now().strftime("%Y%m%d_%H%M%S")
+        save_name = f"upload_{ts}.csv"
+        save_path = raw_dir / save_name
+        df.to_csv(save_path, index=False)
+
+        click.echo(f"   Строк: {len(df)}")
+        click.echo(f"   SKU: {df['sku_id'].nunique()}")
+        click.secho(f"✅ Файл сохранён: {save_path}", fg='green')
+
+    except Exception as e:
+        click.secho(f"❌ Ошибка: {e}", fg='red')
+        sys.exit(1)
+
+
+@data.command()
+@click.argument('file_path', type=click.Path(exists=True))
+def validate(file_path):
+    """Validate a data file without importing.
+
+    Checks required columns, data types, missing values, duplicates and outliers.
+
+    Examples:
+        forecastly data validate sales.csv
+        forecastly data validate report.xlsx
+    """
+    import pandas as pd
+    import numpy as np
+    from pathlib import Path as P
+
+    ext = P(file_path).suffix.lower()
+    click.echo(f"🔍 Валидация файла {file_path}...")
+
+    try:
+        if ext == '.xlsx':
+            df = pd.read_excel(file_path, engine='openpyxl')
+        else:
+            df = pd.read_csv(file_path)
+
+        df.columns = [c.strip().lower() for c in df.columns]
+        col_map = {"qty": "units", "quantity": "units", "sales": "units"}
+        df.rename(columns=col_map, inplace=True)
+
+        click.echo(f"\n📋 Отчёт о качестве данных:")
+        click.echo(f"   Строк: {len(df):,}")
+        click.echo(f"   Столбцов: {len(df.columns)}")
+        click.echo(f"   Столбцы: {list(df.columns)}")
+
+        # Проверка обязательных полей
+        required = {"date", "sku_id", "units"}
+        present = required & set(df.columns)
+        missing = required - set(df.columns)
+        click.echo(f"\n   Обязательные поля:")
+        for f in sorted(required):
+            if f in present:
+                click.secho(f"     ✅ {f}", fg='green')
+            else:
+                click.secho(f"     ❌ {f} — отсутствует", fg='red')
+
+        if 'sku_id' in df.columns:
+            click.echo(f"\n   SKU: {df['sku_id'].nunique()}")
+        if 'date' in df.columns:
+            click.echo(f"   Даты: {df['date'].min()} — {df['date'].max()}")
+
+        # Пропуски
+        miss = df.isnull().sum()
+        miss = miss[miss > 0]
+        if len(miss) > 0:
+            click.echo(f"\n   Пропуски:")
+            for col, cnt in miss.items():
+                pct = cnt / len(df) * 100
+                click.echo(f"     {col}: {cnt} ({pct:.1f}%)")
+        else:
+            click.secho("   Пропусков нет", fg='green')
+
+        # Дубликаты
+        dups = df.duplicated().sum()
+        click.echo(f"   Дубликатов: {dups}")
+
+        # Выбросы по IQR
+        if 'units' in df.columns:
+            q1 = df['units'].quantile(0.25)
+            q3 = df['units'].quantile(0.75)
+            iqr = q3 - q1
+            outliers = int(((df['units'] < q1 - 1.5 * iqr) | (df['units'] > q3 + 1.5 * iqr)).sum())
+            click.echo(f"   Выбросы (units, IQR): {outliers}")
+
+        if missing:
+            click.secho("\n❌ Файл не прошёл валидацию", fg='red')
+            sys.exit(1)
+        else:
+            click.secho("\n✅ Валидация пройдена", fg='green')
+
+    except Exception as e:
+        click.secho(f"❌ Ошибка: {e}", fg='red')
+        sys.exit(1)
 
 
 @data.command()
@@ -519,6 +735,64 @@ def cleanup(days):
     except Exception as e:
         db.rollback()
         click.secho(f"❌ Cleanup failed: {e}", fg='red')
+        sys.exit(1)
+    finally:
+        db.close()
+
+
+# Audit commands
+@cli.group()
+def audit():
+    """Audit log commands."""
+    pass
+
+
+@audit.command()
+@click.option('--output', '-o', default='audit_export.csv', help='Output CSV file')
+@click.option('--hours', type=int, default=720, help='Export logs from last N hours')
+def export(output, hours):
+    """Export audit logs to CSV file.
+
+    Examples:
+        forecastly audit export
+        forecastly audit export -o audit.csv --hours 48
+    """
+    from src.db.database import SessionLocal
+    from src.db.models import SecurityAuditLog
+    from datetime import datetime, timedelta
+    import pandas as pd
+
+    click.echo(f"📋 Экспорт аудит-логов за {hours} часов...")
+
+    try:
+        db = SessionLocal()
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
+
+        logs = db.query(SecurityAuditLog).filter(
+            SecurityAuditLog.created_at >= cutoff
+        ).order_by(SecurityAuditLog.created_at.desc()).all()
+
+        if not logs:
+            click.echo("Нет записей аудита за указанный период.")
+            return
+
+        data = [{
+            'id': log.id,
+            'event_type': log.event_type,
+            'user_id': log.user_id,
+            'user_email': log.user_email,
+            'ip_address': log.ip_address,
+            'severity': log.severity,
+            'details': log.details,
+            'created_at': log.created_at.isoformat() if log.created_at else None,
+        } for log in logs]
+
+        df = pd.DataFrame(data)
+        df.to_csv(output, index=False)
+
+        click.secho(f"✅ Экспортировано {len(df)} записей в {output}", fg='green')
+    except Exception as e:
+        click.secho(f"❌ Ошибка: {e}", fg='red')
         sys.exit(1)
     finally:
         db.close()

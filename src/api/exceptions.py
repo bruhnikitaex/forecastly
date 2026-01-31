@@ -150,17 +150,23 @@ class RateLimitExceededException(ForecastlyException):
 # Exception Handlers
 # ==============================================================================
 
+def _get_trace_id(request: Request) -> str:
+    """Extract trace_id from request state (set by middleware)."""
+    return getattr(request.state, "trace_id", "unknown")
+
+
 async def forecastly_exception_handler(
     request: Request, exc: ForecastlyException
 ) -> JSONResponse:
     """
     Handler for all custom Forecastly exceptions.
 
-    Returns structured error response with error code and details.
+    Returns structured error response with error code, details and trace_id.
     """
+    trace_id = _get_trace_id(request)
     logger.error(
-        f"ForecastlyException: {exc.error_code} - {exc.message}",
-        extra={"details": exc.details, "path": request.url.path},
+        f"[{trace_id}] ForecastlyException: {exc.error_code} - {exc.message}",
+        extra={"details": exc.details, "path": request.url.path, "trace_id": trace_id},
     )
 
     return JSONResponse(
@@ -171,6 +177,7 @@ async def forecastly_exception_handler(
                 "message": exc.message,
                 "details": exc.details,
             },
+            "trace_id": trace_id,
             "path": str(request.url.path),
             "timestamp": datetime.now().isoformat(),
         },
@@ -201,6 +208,7 @@ async def validation_exception_handler(
         extra={"errors": errors},
     )
 
+    trace_id = _get_trace_id(request)
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
@@ -209,7 +217,9 @@ async def validation_exception_handler(
                 "message": "Request validation failed",
                 "details": {"validation_errors": errors},
             },
+            "trace_id": trace_id,
             "path": str(request.url.path),
+            "timestamp": datetime.now().isoformat(),
         },
     )
 
@@ -236,6 +246,7 @@ async def sqlalchemy_exception_handler(
         message = "Database operation failed"
         error_code = "DATABASE_ERROR"
 
+    trace_id = _get_trace_id(request)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
@@ -246,7 +257,9 @@ async def sqlalchemy_exception_handler(
                     "hint": "Check your request parameters and try again",
                 },
             },
+            "trace_id": trace_id,
             "path": str(request.url.path),
+            "timestamp": datetime.now().isoformat(),
         },
     )
 
@@ -263,6 +276,7 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
         extra={"path": request.url.path},
     )
 
+    trace_id = _get_trace_id(request)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
@@ -273,7 +287,9 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
                     "hint": "Please contact support if the problem persists",
                 },
             },
+            "trace_id": trace_id,
             "path": str(request.url.path),
+            "timestamp": datetime.now().isoformat(),
         },
     )
 
