@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (No unreleased changes)
 
+## [1.5.2] - 2026-02-03
+
+### Added
+- count_jobs() method for accurate job pagination
+- .gitignore exception for .env.example template
+
+### Changed
+- Updated pyproject.toml version to 1.5.1
+- Improved database error handling with specific SQLAlchemyError exceptions
+- Enhanced transaction error logging in database.py
+
+### Fixed
+- SQLAlchemy anti-patterns: replaced == True/False with .is_(True/False)
+- TODO in jobs_router.py: now returns actual total job count
+
 ## [1.5.1] - 2026-02-03
 
 ### Added
