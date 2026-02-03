@@ -10,6 +10,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - (No unreleased changes)
 
+## [1.5.1] - 2026-02-03
+
+### Added
+- .env.example file with comprehensive configuration template
+- PostgreSQL import endpoint with security improvements
+- Centralized version management in src/__version__.py
+- XGBoost model training to demo scripts
+- Comprehensive error handling with specific exception types
+- Validation for PostgreSQL table and database names
+
+### Changed
+- Moved database credentials from Query parameters to POST body for security
+- All datetime.now() calls updated to use timezone.utc
+- Improved demo scripts (run_demo.bat/sh) with progress indicators and error handling
+- Increased forecast horizon limit from 30 to 120 days
+- Enhanced error messages with better logging
+
+### Fixed
+- **CRITICAL:** SQL Injection vulnerability in PostgreSQL import endpoint
+- **CRITICAL:** Credentials exposure in Query parameters
+- Duplicate "Выйти" button in Streamlit dashboard
+- Missing timeout in subprocess.run() calls (added 300s timeout)
+- Bare exception handlers replaced with specific exception types
+- Hardcoded version string (now centralized)
+
+### Security
+- Added regex validation for table and database names to prevent SQL injection
+- Password masking in logs
+- Improved input validation across API endpoints
+
 ## [1.3.0] - 2026-01-26
 
 ### Added

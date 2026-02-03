@@ -65,8 +65,9 @@ if USE_DATABASE:
 try:
     DATA_RAW = Path(PATHS["data"].get("raw", "data/raw"))
     DATA_PROC = Path(PATHS["data"].get("processed", "data/processed"))
-except Exception:
-    # fallback
+except (KeyError, TypeError, AttributeError) as e:
+    # Fallback если конфиг не найден
+    logger.warning(f"Не удалось загрузить пути из конфига: {e}. Используются значения по умолчанию.")
     DATA_RAW = Path("data/raw")
     DATA_PROC = Path("data/processed")
 
@@ -351,7 +352,7 @@ def get_skus_v1(
 @app.get("/api/v1/predict", tags=["Predictions"])
 def get_predict_v1(
     sku_id: str = Query(..., description="SKU товара (например SKU001)"),
-    horizon: int = Query(14, ge=1, le=30, description="Горизонт прогноза в днях (1-30)"),
+    horizon: int = Query(14, ge=1, le=120, description="Горизонт прогноза в днях (1-120)"),
     db: Session = Depends(get_optional_db)
 ):
     """Возвращает прогноз по конкретному SKU."""
@@ -421,7 +422,7 @@ def get_predict_v1(
 
 @app.post("/api/v1/predict/rebuild", tags=["Predictions"])
 def rebuild_predict_v1(
-    horizon: int = Query(14, ge=1, le=30),
+    horizon: int = Query(14, ge=1, le=120, description="Горизонт прогноза в днях (1-120)"),
     save_to_db: bool = Query(False, description="Сохранить результаты в БД"),
     db: Session = Depends(get_optional_db)
 ):
