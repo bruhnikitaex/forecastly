@@ -125,8 +125,12 @@ def load_metrics_data(file_path: str = 'data/processed/metrics.csv') -> pd.DataF
 
 
 def run_command(cmd: list, description: str) -> tuple:
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    return result.returncode == 0, result.stderr
+    """Выполняет команду с timeout для безопасности."""
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        return result.returncode == 0, result.stderr
+    except subprocess.TimeoutExpired:
+        return False, f"Команда превысила лимит времени выполнения (300 секунд)"
 
 
 def to_excel_bytes(df: pd.DataFrame) -> bytes:
@@ -304,18 +308,6 @@ with st.sidebar:
 
     if st.button("Обновить статус", use_container_width=True):
         st.cache_data.clear()
-        st.rerun()
-
-    st.divider()
-
-    # Информация о пользователе
-    st.markdown("### Пользователь")
-    st.markdown(f"**{st.session_state.user_email}**")
-    st.markdown(f"Роль: `{st.session_state.user_role}`")
-    if st.button("Выйти", use_container_width=True):
-        for key in ['authenticated', 'user_role', 'user_email', 'token']:
-            st.session_state[key] = None
-        st.session_state.authenticated = False
         st.rerun()
 
     st.divider()

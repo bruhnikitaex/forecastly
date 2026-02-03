@@ -10,13 +10,14 @@ Endpoints:
 import os
 import hashlib
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from io import BytesIO
 
 import pandas as pd
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from src.utils.config import PATHS
@@ -104,7 +105,7 @@ async def upload_data(
 
     # Сохраняем
     DATA_RAW.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     save_name = f"upload_{ts}_{file_hash}.csv"
     save_path = DATA_RAW / save_name
     df.to_csv(save_path, index=False)
@@ -139,7 +140,7 @@ async def upload_data(
         "status": "ok",
         "filename": filename,
         "saved_as": save_name,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "dq_report": dq,
     }
 
@@ -178,14 +179,19 @@ def list_datasets():
 # POSTGRESQL IMPORT
 # ============================================================================
 
+class PostgresImportRequest(BaseModel):
+    """Запрос на импорт данных из PostgreSQL."""
+    table: str = Field("sales", description="Имя таблицы в PostgreSQL", pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+    host: str = Field("localhost", description="Хост PostgreSQL")
+    port: int = Field(5432, ge=1, le=65535, description="Порт PostgreSQL")
+    database: str = Field(..., description="Имя базы данных", pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+    user: str = Field(..., description="Пользователь")
+    password: str = Field(..., description="Пароль")
+
+
 @router.post("/data/import/postgres")
 def import_from_postgres(
-    table: str = Query("sales", description="Имя таблицы в PostgreSQL"),
-    host: str = Query("localhost", description="Хост PostgreSQL"),
-    port: int = Query(5432, ge=1, le=65535),
-    database: str = Query(..., description="Имя базы данных"),
-    user: str = Query(..., description="Пользователь"),
-    password: str = Query(..., description="Пароль"),
+    request: PostgresImportRequest,
     db: Session = Depends(_get_optional_db),
 ):
     """
@@ -193,14 +199,34 @@ def import_from_postgres(
 
     Читает таблицу продаж и сохраняет в формате CSV для дальнейшей обработки.
     Обязательные поля в таблице: date, sku_id, qty/units.
+
+    ВАЖНО: Credentials передаются в теле POST запроса для безопасности.
     """
     try:
-        from sqlalchemy import create_engine
+        from sqlalchemy import create_engine, inspect
+        import re
 
-        conn_str = f"postgresql://{user}:{password}@{host}:{port}/{database}"
-        engine = create_engine(conn_str)
+        # Валидация имени таблицы и базы данных (защита от SQL injection)
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', request.table):
+            raise HTTPException(400, "Недопустимое имя таблицы. Используйте только буквы, цифры и подчеркивание.")
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', request.database):
+            raise HTTPException(400, "Недопустимое имя базы данных. Используйте только буквы, цифры и подчеркивание.")
 
-        df = pd.read_sql_table(table, engine)
+        # Создаем connection string (пароль не логируется)
+        conn_str = f"postgresql://{request.user}:***@{request.host}:{request.port}/{request.database}"
+        logger.info(f"Подключение к PostgreSQL: {conn_str}")
+
+        # Реальный connection string с паролем
+        real_conn_str = f"postgresql://{request.user}:{request.password}@{request.host}:{request.port}/{request.database}"
+        engine = create_engine(real_conn_str, echo=False)
+
+        # Проверяем что таблица существует
+        inspector = inspect(engine)
+        available_tables = inspector.get_table_names()
+        if request.table not in available_tables:
+            raise HTTPException(404, f"Таблица '{request.table}' не найдена в базе данных. Доступные таблицы: {available_tables}")
+
+        df = pd.read_sql_table(request.table, engine)
         logger.info(f"Загружено {len(df)} строк из {host}:{port}/{database}.{table}")
 
         # Нормализация колонок
@@ -217,7 +243,7 @@ def import_from_postgres(
 
         # Сохраняем
         DATA_RAW.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         save_name = f"pg_import_{ts}.csv"
         save_path = DATA_RAW / save_name
         df.to_csv(save_path, index=False)
@@ -228,7 +254,7 @@ def import_from_postgres(
             "saved_as": save_name,
             "rows": len(df),
             "sku_count": int(df["sku_id"].nunique()),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except HTTPException:

@@ -20,7 +20,7 @@ from pathlib import Path
 import subprocess
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,9 @@ from sqlalchemy.orm import Session
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+
+# Version
+from src.__version__ import __version__
 
 from src.utils.config import PATHS
 from src.utils.logger import logger
@@ -92,7 +95,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Forecastly API",
     description="API для системы анализа и прогнозирования продаж",
-    version="1.4.0",
+    version="__version__",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan
@@ -199,8 +202,8 @@ def health():
     status = {
         "status": "ok",
         "service": "forecastly-api",
-        "version": "1.4.0",
-        "timestamp": datetime.now().isoformat(),
+        "version": "__version__",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "database_mode": USE_DATABASE
     }
 
@@ -215,7 +218,7 @@ def root():
     """Корневой endpoint с информацией об API."""
     return {
         "service": "forecastly-api",
-        "version": "1.4.0",
+        "version": "__version__",
         "database_mode": USE_DATABASE,
         "docs": "/docs",
         "redoc": "/redoc",
@@ -233,7 +236,7 @@ def root():
             "db_stats": "/api/v1/db/stats" if USE_DATABASE else None,
             "forecast_runs": "/api/v1/forecast-runs" if USE_DATABASE else None
         },
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 
@@ -245,7 +248,7 @@ def system_status(db: Session = Depends(get_optional_db)):
 
         status = {
             "system": "ready",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "database_mode": USE_DATABASE,
             "data_available": {
                 "raw": (DATA_RAW / "sales_synth.csv").exists(),
@@ -440,7 +443,7 @@ def rebuild_predict_v1(
             "status": "ok",
             "message": "Прогнозы пересчитаны успешно",
             "horizon": horizon,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
         # Сохраняем в БД если запрошено
@@ -553,7 +556,7 @@ def get_db_stats(db: Session = Depends(get_optional_db)):
         stats = crud.get_database_stats(db)
         return {
             "status": "ok",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "stats": stats
         }
     except Exception as e:
@@ -627,7 +630,7 @@ def sync_csv_to_db(db: Session = Depends(get_optional_db)):
             result["synced"]["metrics"] = count
 
         result["status"] = "ok"
-        result["timestamp"] = datetime.now().isoformat()
+        result["timestamp"] = datetime.now(timezone.utc).isoformat()
 
         logger.info(f"Синхронизация завершена: {result}")
         return result
@@ -675,7 +678,7 @@ def get_detailed_health():
 
     return {
         "status": "ok",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "system": collector.system_metrics,
         "database_mode": USE_DATABASE,
         "components": {
