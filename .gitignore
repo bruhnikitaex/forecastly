@@ -37,6 +37,7 @@ data/temp/
 # === Configuration ===
 *.env
 .env.*
+!.env.example
 .envrc
 
 # === IDE and OS ===

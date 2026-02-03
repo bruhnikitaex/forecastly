@@ -68,7 +68,7 @@ async def get_current_user(
         key_hash = hash_api_key(api_key)
         db_key = db.query(APIKey).filter(
             APIKey.key_hash == key_hash,
-            APIKey.is_active == True
+            APIKey.is_active.is_(True)
         ).first()
 
         if db_key:
@@ -248,7 +248,7 @@ async def get_api_key_user(
     key_hash = hash_api_key(api_key)
     db_key = db.query(APIKey).filter(
         APIKey.key_hash == key_hash,
-        APIKey.is_active == True
+        APIKey.is_active.is_(True)
     ).first()
 
     if not db_key:

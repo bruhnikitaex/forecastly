@@ -143,6 +143,43 @@ class JobQueue:
             with get_db_session() as session:
                 return _list(session)
 
+    def count_jobs(
+        self,
+        tenant_id: Optional[int] = None,
+        status: Optional[JobStatus] = None,
+        job_type: Optional[JobType] = None,
+        db: Optional[Session] = None,
+    ) -> int:
+        """
+        Count jobs with optional filters.
+
+        Args:
+            tenant_id: Filter by tenant
+            status: Filter by status
+            job_type: Filter by job type
+            db: Optional database session
+
+        Returns:
+            Total count of jobs matching filters
+        """
+        def _count(session: Session):
+            query = session.query(BackgroundJob)
+
+            if tenant_id is not None:
+                query = query.filter(BackgroundJob.tenant_id == tenant_id)
+            if status is not None:
+                query = query.filter(BackgroundJob.status == status.value)
+            if job_type is not None:
+                query = query.filter(BackgroundJob.job_type == job_type.value)
+
+            return query.count()
+
+        if db:
+            return _count(db)
+        else:
+            with get_db_session() as session:
+                return _count(session)
+
     def get_next_pending_job(self, db: Optional[Session] = None) -> Optional[Dict[str, Any]]:
         """
         Get the next pending job to process (highest priority, oldest first).

@@ -122,8 +122,9 @@ def get_db_session():
     try:
         yield db
         db.commit()
-    except Exception:
+    except Exception as e:
         db.rollback()
+        logger.error(f"Ошибка транзакции БД: {e}")
         raise
     finally:
         db.close()
@@ -159,10 +160,14 @@ def check_connection() -> bool:
         True если соединение успешно, False иначе.
     """
     from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         return True
-    except Exception as e:
+    except SQLAlchemyError as e:
         logger.error(f"Ошибка подключения к БД: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Неожиданная ошибка при проверке подключения: {e}")
         return False

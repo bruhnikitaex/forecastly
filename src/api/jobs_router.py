@@ -207,9 +207,15 @@ async def list_jobs(
             db=db,
         )
 
+        total = queue.count_jobs(
+            status=status_filter,
+            job_type=type_filter,
+            db=db,
+        )
+
         return JobListResponse(
             jobs=[_job_dict_to_response(j) for j in jobs],
-            total=len(jobs),  # TODO: Get actual total count
+            total=total,
             limit=limit,
             offset=offset,
         )
